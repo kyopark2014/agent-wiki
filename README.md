@@ -150,6 +150,21 @@ ERROR: No graph found. Run /graphify <path> first to build the graph.
 | 특정 개념 상세 설명 | `explain "개념명"` |
 
 
+## 실행 결과
+
+아래와 같이 "/graphify contents/"를 하면 contents 폴더의 파일들을 가지고 graph를 생성합니다.
+
+<img width="723" height="510" alt="image" src="https://github.com/user-attachments/assets/366be416-3179-4072-bb2e-981b7b4e50ea" />
+
+이후 아래와 같이 "/graphify query RAG를 LLM Wiki로 전환하는 방법은?"라고 질문하면 아래와 같이 그래프를 조회합니다.
+
+<img width="728" height="667" alt="image" src="https://github.com/user-attachments/assets/b99ba277-445c-47ee-80a6-6a20d4b1dbd9" />
+
+최종적으로 아래와 같은 결과를 얻을 수 있습니다.
+
+<img width="676" height="762" alt="image" src="https://github.com/user-attachments/assets/d0fea24b-e907-4c60-a1f0-4cee72c45a23" />
+
+
 ## Reference
 
 [RAG Is Not Enough. Karpathy Just Showed Us What Comes Next.](./contents/rag_vs_llm_wiki_summary.md)
