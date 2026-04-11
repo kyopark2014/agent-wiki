@@ -106,6 +106,10 @@ pip install graphifyy && graphify install
 
 <img width="676" height="762" alt="image" src="https://github.com/user-attachments/assets/d0fea24b-e907-4c60-a1f0-4cee72c45a23" />
 
+생성된 graph는 아래와 같습니다.
+
+<img width="866" height="900" alt="image" src="https://github.com/user-attachments/assets/60a895a4-3cd6-460c-809e-8ac919e59b67" />
+
 
 ## Reference
 
