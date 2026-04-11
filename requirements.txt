@@ -43,3 +43,4 @@ reportlab
 pypdf
 pdfplumber
 browser-use[cli]
+graphifyy
