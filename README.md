@@ -1,7 +1,7 @@
 # Agent Wiki
 
 
-OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구조화된 Markdown을 이용해 로컬에서 LLM Wiki를 활용하여 데이터를 조회하는 방법을 제안합니다. 이것은 RAG/벡터DB없이도 로컬에 있는 다양한 데이터를 조회할 수 있는 방법을 제공합니다.
+OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구조화된 Markdown을 이용해 로컬에서 LLM Wiki를 활용하여 데이터를 조회하는 방법을 제안하였는데, RAG/벡터DB없이도 로컬에 있는 다양한 데이터를 Graph로 조회할 수 있는 방법을 제공합니다. 
 
 ### 핵심 루프 (Core Loop)
 
