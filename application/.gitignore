@@ -1,5 +1,6 @@
 __pycache__
 
+graphify-out/
 # configuration
 config.json
 MEMORY.md
