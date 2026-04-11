@@ -57,6 +57,99 @@ pip install graphifyy && graphify install
 /graphify .   # 현재 폴더에 실행
 ```
 
+## 검색하는 방법
+
+### 1️⃣ `/graphify query` - 질문으로 검색
+
+가장 기본적인 검색 방법입니다. 자연어로 질문하면 그래프를 탐색해서 답변해줍니다.
+
+```bash
+# 기본 BFS 탐색 (넓게 탐색 - "X는 무엇과 연결되어 있나?")
+/graphify query "RAG는 어떻게 동작하나요?"
+
+# DFS 탐색 (깊게 탐색 - "X에서 Y까지 어떻게 연결되나?")
+/graphify query "인증 모듈이 데이터베이스에 어떻게 연결되나?" --dfs
+
+# 토큰 예산 제한 (기본값 2000)
+/graphify query "트랜스포머 아키텍처란?" --budget 1500
+```
+
+| 모드 | 특징 | 적합한 질문 |
+|------|------|------------|
+| **BFS** (기본) | 넓게 탐색, 가까운 노드부터 | "X는 무엇인가?", "X와 연결된 것은?" |
+| **DFS** (`--dfs`) | 깊게 탐색, 특정 경로 추적 | "X에서 Y까지 어떻게 연결되나?" |
+
+---
+
+### 2️⃣ `/graphify path` - 두 개념 사이의 최단 경로 찾기
+
+두 노드 사이의 연결 경로를 찾아줍니다.
+
+```bash
+/graphify path "AuthModule" "Database"
+/graphify path "RAG" "LLM"
+```
+
+결과 예시:
+```
+Shortest path (3 hops):
+  AuthModule --calls--> [EXTRACTED]
+  TokenValidator --depends_on--> [INFERRED]
+  Database
+```
+
+---
+
+### 3️⃣ `/graphify explain` - 특정 개념 설명
+
+특정 노드(개념)에 대한 상세 설명과 연결 관계를 보여줍니다.
+
+```bash
+/graphify explain "SwinTransformer"
+/graphify explain "RAG"
+```
+
+결과 예시:
+```
+NODE: RAG
+  source: docs/rag_overview.md
+  degree: 12
+
+CONNECTIONS:
+  --references--> LLM [EXTRACTED]
+  --uses--> VectorDB [EXTRACTED]
+  --conceptually_related_to--> Fine-tuning [INFERRED]
+```
+
+---
+
+## ⚠️ 검색 전 필수 조건
+
+검색 명령어를 사용하려면 **먼저 그래프가 빌드되어 있어야 합니다!**
+
+```bash
+# 1. 먼저 그래프 빌드
+/graphify <경로>
+
+# 2. 그 다음 검색 가능
+/graphify query "질문"
+```
+
+그래프가 없으면 이런 오류가 납니다:
+```
+ERROR: No graph found. Run /graphify <path> first to build the graph.
+```
+
+### 💡 검색 명령어 요약
+
+| 목적 | 명령어 |
+|------|--------|
+| 개념에 대해 넓게 알고 싶을 때 | `query "질문"` |
+| 특정 경로/의존성 추적 | `query "질문" --dfs` |
+| 두 개념의 연결 관계 | `path "개념A" "개념B"` |
+| 특정 개념 상세 설명 | `explain "개념명"` |
+
+
 ## Reference
 
 [RAG Is Not Enough. Karpathy Just Showed Us What Comes Next.](./contents/rag_vs_llm_wiki_summary.md)

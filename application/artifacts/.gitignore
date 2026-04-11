@@ -1,0 +1,7 @@
+__pycache__
+raw/
+# configuration
+config.json
+*.json
+*.html
+*.md

@@ -1,0 +1,9 @@
+__pycache__
+
+graphify-out/
+# configuration
+config.json
+MEMORY.md
+memory/
+node_modules/
+package-lock.json
