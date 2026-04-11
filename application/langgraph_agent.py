@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMess
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from pytz import timezone
 from langchain_core.tools import tool
+from urllib import parse as url_parse
 
 logging.basicConfig(
     level=logging.INFO,

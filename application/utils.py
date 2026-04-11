@@ -31,7 +31,7 @@ def load_config():
         logger.error(f"Error loading config: {e}")
         config = {}
 
-        projectName = "agent-skills"
+        projectName = "agent-wiki"
         session = boto3.Session()
         region = session.region_name
         config['region'] = region
