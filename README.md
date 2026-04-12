@@ -100,6 +100,13 @@ pip install graphifyy && graphify install
 /graphify explain "RAG"
 ```
 
+### 데이터 추가
+
+```bash
+/graphify /Documents/Docs --update
+```
+
+
 ## 실행 결과
 
 아래와 같이 "/graphify contents/"를 하면 contents 폴더의 파일들을 가지고 graph를 생성합니다.
