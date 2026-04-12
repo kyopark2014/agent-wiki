@@ -50,6 +50,14 @@ pip install graphifyy && graphify install
 /graphify .   # 현재 폴더에 실행
 ```
 
+### 지원 파일
+
+- Code: .py, .ts, .js, .go, .rs, .java, .cpp, etc.
+- Documents: .md, .txt, .docx, etc.
+- Papers: .pdf
+- Images: .png, .jpg, .webp (analyzed with vision)
+- Video/Audio: .mp4, .mp3, .wav (transcribed with Whisper)
+
 ## 검색하는 방법
 
 ### 1️⃣ `/graphify query` - 질문으로 검색
