@@ -76,6 +76,7 @@ with st.sidebar:
         "web_fetch",
         "obsidian",
         "browser-use",
+        "korea_weather",
         "사용자 설정"
     ]    
     if mode=='Agent' or mode=='Agent (Chat)':
@@ -104,7 +105,7 @@ with st.sidebar:
 
         # Change radio to checkbox        
         mcp_selections = {}
-        default_selections = ["web_fetch", "obsidian"]
+        default_selections = ["web_fetch"]
         
         with st.expander("MCP 옵션 선택", expanded=True):
             for option in mcp_options:
