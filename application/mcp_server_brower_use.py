@@ -46,6 +46,18 @@ COMMAND_TIMEOUT = 60
 SEARCH_TIMEOUT = 120
 DEFAULT_PROFILE = "Default"
 
+
+def _chrome_available() -> bool:
+    """Return True if a real Chrome/Google Chrome executable is found on PATH."""
+    import shutil
+    for name in ("google-chrome", "google-chrome-stable", "chrome"):
+        if shutil.which(name):
+            return True
+    return False
+
+
+_HAS_CHROME = _chrome_available()
+
 RECAPTCHA_INDICATORS = [
     "recaptcha", "captcha", "unusual traffic", "automated queries",
     "not a robot", "verify you're human", "bot detection",
@@ -695,12 +707,15 @@ def browser_web_search(
         Formatted search results with titles, URLs, and snippets
     """
     use_profile = profile
-    if use_profile is None and search_engine == "google":
+    if use_profile is None and search_engine == "google" and _HAS_CHROME:
         use_profile = DEFAULT_PROFILE
+    elif use_profile and not _HAS_CHROME:
+        logger.warning("Chrome not found, ignoring --profile (using Chromium instead)")
+        use_profile = None
 
     results, raw = _do_search(query, search_engine, max_results, headed, use_profile)
 
-    if raw == "__CAPTCHA__" and use_profile is None:
+    if raw == "__CAPTCHA__" and use_profile is None and _HAS_CHROME:
         logger.info("CAPTCHA detected, retrying with Chrome profile...")
         _run_browser_use("close")
         results, raw = _do_search(query, search_engine, max_results, headed, DEFAULT_PROFILE)

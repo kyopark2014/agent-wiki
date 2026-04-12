@@ -24,6 +24,13 @@ RUN npm install -g pptxgenjs sharp react react-dom react-icons docx && \
 # Allow require('pptxgenjs') to resolve from any working directory
 ENV NODE_PATH=/usr/local/lib/node_modules:/app/node_modules
 
+# Install Google Chrome (stable)
+RUN curl -fsSL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -o /tmp/chrome.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends /tmp/chrome.deb && \
+    rm /tmp/chrome.deb && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install mcp-server-fetch-typescript and Playwright browsers
 RUN npx -y mcp-server-fetch-typescript --version 2>/dev/null || true && \
     npx playwright install --with-deps chromium
