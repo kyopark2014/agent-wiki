@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 import traceback
+import subprocess
 import chat
 import utils
 import skill
@@ -19,7 +20,7 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMess
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from pytz import timezone
 from langchain_core.tools import tool
-from urllib import parse as url_parse
+from urllib import parse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -481,14 +482,32 @@ def memory_get(path: str, from_line: int = 0, lines: int = 0) -> str:
     except Exception as e:
         return json.dumps({"text": f"Error reading file: {e}", "path": path}, ensure_ascii=False)
 
+@tool
+def bash(command: str) -> str:
+    """Execute a bash command and return the result"""
+    logger.info(f"###### bash: {command} ######")
+    _ensure_cli_scripts_on_path()
+    result = subprocess.run(
+        command, shell=True, capture_output=True, text=True,
+        cwd=WORKING_DIR, timeout=300,
+        env=os.environ,
+    )
+    parts = []
+    if result.stdout:
+        parts.append(f"STDOUT:\n{result.stdout}")
+    if result.stderr:
+        parts.append(f"STDERR:\n{result.stderr}")
+    if result.returncode != 0:
+        parts.append(f"Return code: {result.returncode}")
+    return "\n".join(parts) if parts else "(no output)"
 
 def get_builtin_tools() -> list:
     """Return the list of built-in tools for the skill-aware agent."""
 
     if config.get("s3_bucket"):
-        return [execute_code, write_file, read_file, upload_file_to_s3, get_current_time]
+        return [execute_code, write_file, read_file, bash, upload_file_to_s3, get_current_time]
     else:
-        return [execute_code, write_file, read_file, get_current_time]
+        return [execute_code, write_file, read_file, bash, get_current_time]
 
 # ═══════════════════════════════════════════════════════════════════
 #  Agent State & System Prompt

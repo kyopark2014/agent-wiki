@@ -4,21 +4,6 @@
   "graph": {
     "hyperedges": [
       {
-        "id": "karpathy_knowledge_ecosystem",
-        "label": "Karpathy \uc9c0\uc2dd \uc0dd\ud0dc\uacc4 (Knowledge Ecosystem)",
-        "nodes": [
-          "second_brain_biz_llm_knowledge_base",
-          "blueprint_llm_kb_blueprint",
-          "rag_llm_wiki",
-          "second_brain_biz_raw_folder",
-          "blueprint_raw_folder"
-        ],
-        "relation": "form",
-        "confidence": "EXTRACTED",
-        "confidence_score": 0.9,
-        "source_file": "contents/karpathy_viral_llm_knowledge_base_blueprint_summary.md"
-      },
-      {
         "id": "autonomous_agent_paradigm",
         "label": "\uc790\uc728 \uc5d0\uc774\uc804\ud2b8 \ud328\ub7ec\ub2e4\uc784 (Autonomous Agent Paradigm)",
         "nodes": [
@@ -47,6 +32,21 @@
         "confidence": "INFERRED",
         "confidence_score": 0.8,
         "source_file": "contents/karpathy_second_brain_enterprise_summary.md"
+      },
+      {
+        "id": "karpathy_knowledge_ecosystem",
+        "label": "Karpathy \uc9c0\uc2dd \uc0dd\ud0dc\uacc4 (Knowledge Ecosystem)",
+        "nodes": [
+          "second_brain_biz_llm_knowledge_base",
+          "blueprint_llm_kb_blueprint",
+          "rag_llm_wiki",
+          "second_brain_biz_raw_folder",
+          "blueprint_raw_folder"
+        ],
+        "relation": "form",
+        "confidence": "EXTRACTED",
+        "confidence_score": 0.9,
+        "source_file": "contents/karpathy_viral_llm_knowledge_base_blueprint_summary.md"
       }
     ]
   },
@@ -1016,21 +1016,6 @@
   ],
   "hyperedges": [
     {
-      "id": "karpathy_knowledge_ecosystem",
-      "label": "Karpathy \uc9c0\uc2dd \uc0dd\ud0dc\uacc4 (Knowledge Ecosystem)",
-      "nodes": [
-        "second_brain_biz_llm_knowledge_base",
-        "blueprint_llm_kb_blueprint",
-        "rag_llm_wiki",
-        "second_brain_biz_raw_folder",
-        "blueprint_raw_folder"
-      ],
-      "relation": "form",
-      "confidence": "EXTRACTED",
-      "confidence_score": 0.9,
-      "source_file": "contents/karpathy_viral_llm_knowledge_base_blueprint_summary.md"
-    },
-    {
       "id": "autonomous_agent_paradigm",
       "label": "\uc790\uc728 \uc5d0\uc774\uc804\ud2b8 \ud328\ub7ec\ub2e4\uc784 (Autonomous Agent Paradigm)",
       "nodes": [
@@ -1059,6 +1044,21 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "contents/karpathy_second_brain_enterprise_summary.md"
+    },
+    {
+      "id": "karpathy_knowledge_ecosystem",
+      "label": "Karpathy \uc9c0\uc2dd \uc0dd\ud0dc\uacc4 (Knowledge Ecosystem)",
+      "nodes": [
+        "second_brain_biz_llm_knowledge_base",
+        "blueprint_llm_kb_blueprint",
+        "rag_llm_wiki",
+        "second_brain_biz_raw_folder",
+        "blueprint_raw_folder"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "contents/karpathy_viral_llm_knowledge_base_blueprint_summary.md"
     }
   ]
 }

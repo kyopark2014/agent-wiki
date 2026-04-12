@@ -75,6 +75,7 @@ with st.sidebar:
         "aws-drawio",
         "web_fetch",
         "obsidian",
+        "browser-use",
         "사용자 설정"
     ]    
     if mode=='Agent' or mode=='Agent (Chat)':

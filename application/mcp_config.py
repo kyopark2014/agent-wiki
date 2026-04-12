@@ -104,7 +104,7 @@ def load_config(mcp_type):
                 "type": "stdio"
                 }
             }
-        }
+        }        
 
     elif mcp_type == "web_fetch":
         return {
@@ -126,6 +126,16 @@ def load_config(mcp_type):
                 "obsidian": {
                     "command": "npx",
                     "args": ["-y", "obsidian-mcp", os.path.expanduser("~/Documents/memo")]
+                }
+            }
+        }
+
+    elif mcp_type == "browser-use":
+        return {
+            "mcpServers": {
+                "mcp-browser-use": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_brower_use.py"]
                 }
             }
         }
