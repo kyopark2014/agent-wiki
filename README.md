@@ -120,7 +120,29 @@ brew install --cask libreoffice
 /Downloads/Docs/AgenticAI의 ppt들을 pdf로 변환하세요. 이미 pdf가 있다면 skip 하세요.
 ```
 
+## 실행 방법
+
+소스를 다운로드 합니다.
+
+```bash
+git clone https://github.com/kyopark2014/agent-wiki
+```
+
+필요한 패키지를 설치합니다.
+
+```bash
+cd agent-wiki && pip install -r requirements.txt
+```
+
+Streamlit app을 실행합니다.
+
+```bash
+streamlit run application/app.py 
+```
+
+
 ## 실행 결과
+
 
 아래와 같이 "/graphify contents/"를 하면 contents 폴더의 파일들을 가지고 graph를 생성합니다.
 
