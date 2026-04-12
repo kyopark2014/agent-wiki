@@ -10,8 +10,7 @@ RUN apt-get update && apt-get install -y curl && \
         libreoffice \
         poppler-utils \
         pandoc \
-        fonts-nanum \
-        fonts-nanum-coding && \
+        fonts-nanum && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install MCP packages globally
