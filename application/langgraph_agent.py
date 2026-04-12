@@ -802,7 +802,12 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
             else:
                 logger.info(f"mcp_tool of {tool.name} already in tools")
         
-        if chat.skill_mode == "Enable":        
+    except Exception as e:
+        logger.error(f"Error creating MCP client or getting tools: {e}")
+        logger.info(f"Falling back to builtin tools only (count: {len(tools)})")
+
+    if chat.skill_mode == "Enable" and tools:
+        try:
             skill_tools = skill.get_skill_tools()
             logger.info(f"skill_tools count: {len(skill_tools)}")
 
@@ -812,20 +817,12 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
                     tools.append(st)
                 else:
                     logger.info(f"skill_tool of {st.name} already in tools")
+        except Exception as e:
+            logger.error(f"Error loading skill tools: {e}")
 
-        if tools is None:
-            logger.error("tools is None - MCP client failed to get tools")
-            tools = []
-        
-        tool_list = [tool.name for tool in tools] if tools else []
-        logger.info(f"tool_list: {tool_list}")
-        
-    except Exception as e:
-        logger.error(f"Error creating MCP client or getting tools: {e}")                        
-        tools = []
-        tool_list = []        
+    tool_list = [t.name for t in tools] if tools else []
+    logger.info(f"tool_list: {tool_list}")
 
-    # If no tools available, use general conversation
     if not tools:
         logger.warning("No tools available, using general conversation mode")
         return None, None
@@ -863,10 +860,14 @@ async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Option
     image_url = []
     references = []
 
-    if mcp_servers != active_mcp_servers:
+    if app is None or mcp_servers != active_mcp_servers:
         active_mcp_servers = mcp_servers
         app, config = await create_agent(mcp_servers, history_mode)
-        
+    
+    if app is None:
+        logger.error("Failed to create agent - app is None")
+        return "에이전트를 생성할 수 없습니다. MCP 서버 설정 또는 도구 구성을 확인해주세요.", []
+
     inputs = {
         "messages": [HumanMessage(content=query)]
     }
