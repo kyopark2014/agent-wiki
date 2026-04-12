@@ -569,20 +569,11 @@ async def call_model(state: State, config):
 
     image_url = state.get('image_url', [])
 
-    tools = config.get("configurable", {}).get("tools", None)
-    custom_prompt = config.get("configurable", {}).get("system_prompt", None)
-    plugin_name = config.get("configurable", {}).get("plugin_name", None)
-    logger.info(f"plugin_name: {plugin_name}")
-    
-    system = build_system_prompt(custom_prompt, plugin_name)
-    logger.info(f"system prompt: {system}")
+    tools = config.get("configurable", {}).get("tools")
+    system = config.get("configurable", {}).get("system_prompt")
 
     reasoning_mode = getattr(chat, 'reasoning_mode', 'Disable')
     chatModel = chat.get_chat(extended_thinking=reasoning_mode)
-
-    if tools is None:
-        logger.warning("tools is None, using empty list")
-        tools = []
 
     model = chatModel.bind_tools(tools)
 
@@ -806,19 +797,15 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
         logger.error(f"Error creating MCP client or getting tools: {e}")
         logger.info(f"Falling back to builtin tools only (count: {len(tools)})")
 
-    if chat.skill_mode == "Enable" and tools:
-        try:
-            skill_tools = skill.get_skill_tools()
-            logger.info(f"skill_tools count: {len(skill_tools)}")
+    system_prompt = None
+    if chat.skill_mode == "Enable":        
+        tools.extend(skill.get_skill_tools())
 
-            tool_names = {tool.name for tool in tools}
-            for st in skill_tools:
-                if st.name not in tool_names:
-                    tools.append(st)
-                else:
-                    logger.info(f"skill_tool of {st.name} already in tools")
-        except Exception as e:
-            logger.error(f"Error loading skill tools: {e}")
+        skill_info = skill.selected_skill_info("base")
+        system_prompt = skill.build_skill_prompt(skill_info)
+
+    else:
+        system_prompt = BASE_SYSTEM_PROMPT
 
     tool_list = [t.name for t in tools] if tools else []
     logger.info(f"tool_list: {tool_list}")
@@ -833,8 +820,7 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "plugin_name": "base",
-            "system_prompt": None
+            "system_prompt": system_prompt
         }
     else:
         app = buildChatAgent(tools)
@@ -842,17 +828,17 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "plugin_name": "base",
-            "system_prompt": None
+            "system_prompt": system_prompt
         }        
     
     return app, config
 
 app = config = None
 active_mcp_servers = []
+active_skills = []
 
-async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Optional[str]=None, history_mode: str="Disable", containers: Optional[dict]=None) -> tuple[str, list]:
-    global app, config, active_mcp_servers
+async def run_langgraph_agent(query: str, mcp_servers: list, history_mode: str="Disable", containers: Optional[dict]=None) -> tuple[str, list]:
+    global app, config, active_mcp_servers, active_skills
 
     chat.index = 0
     chat.streaming_index = 0
@@ -860,8 +846,12 @@ async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Option
     image_url = []
     references = []
 
-    if app is None or mcp_servers != active_mcp_servers:
+    selected_skill_info = skill.selected_skill_info("base")
+
+    if app is None or active_mcp_servers != mcp_servers or active_skills != selected_skill_info:
         active_mcp_servers = mcp_servers
+        active_skills = selected_skill_info
+
         app, config = await create_agent(mcp_servers, history_mode)
     
     if app is None:

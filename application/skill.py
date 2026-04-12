@@ -192,21 +192,16 @@ SKILL_USAGE_GUIDE = (
     "\n## Skill 사용 가이드\n"
     "위의 <available_skills>에 나열된 skill이 사용자의 요청과 관련될 때:\n"
     "1. 먼저 get_skill_instructions 도구로 해당 skill의 상세 지침을 로드하세요.\n"
-    "2. 지침에 포함된 코드 패턴을 execute_code 도구로 실행하세요.\n"
-    "3. skill 지침이 없는 일반 질문은 직접 답변하세요.\n"
+    "2. **중요: 지침을 읽기 전에 어떤 작업을 할지 단정짓지 마세요.** "
+    "skill의 description에 서브커맨드(query, path, explain 등)가 있다면, "
+    "사용자 명령의 서브커맨드를 정확히 파악한 후 그에 맞는 동작을 설명하세요.\n"
+    "3. 지침에 포함된 코드 패턴을 execute_code 도구로 실행하세요.\n"
+    "4. skill 지침이 없는 일반 질문은 직접 답변하세요.\n"
 )
 
-def build_skill_prompt(plugin_name: str) -> str:
+def build_skill_prompt(skill_info: list) -> str:
     """Build skill-related prompt: path info, available skills XML, and usage guide."""
-    skill_info = selected_skill_info(plugin_name)
-    logger.info(f"plugin_name: {plugin_name}, skill_info: {skill_info}")
-
-    if plugin_name != "base":
-        default_skill_info = selected_skill_info("base")
-        if default_skill_info:
-            skill_info.extend(default_skill_info)
-            logger.info(f"default_skill_info: {default_skill_info}")
-
+        
     path_info = (
         f"## Paths (use absolute paths for write_file, read_file)\n"
         f"- WORKING_DIR: {WORKING_DIR}\n"
