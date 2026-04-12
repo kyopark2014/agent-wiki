@@ -336,7 +336,6 @@ if prompt := st.chat_input("메시지를 입력하세요."):
                     query=prompt, 
                     mcp_servers=mcp_servers, 
                     history_mode=history_mode, 
-                    plugin_name="base",
                     containers=containers))
 
             st.session_state.messages.append({

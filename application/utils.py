@@ -41,7 +41,6 @@ def load_config():
         response = sts.get_caller_identity()
         accountId = response["Account"]
         config['accountId'] = accountId
-        config['s3_bucket'] = f'storage-for-{projectName}-{accountId}-{region}'
         
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)    

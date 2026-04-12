@@ -35,6 +35,9 @@ s3_prefix = "docs"
 capture_prefix = "captures"
 user_id = "langgraph"
 
+config = utils.load_config()
+s3_bucket = config.get("s3_bucket")
+
 def s3_uri_to_console_url(uri: str, region: str) -> str:
     """Open the object in the AWS S3 console (when sharing_url is not configured)."""
     if not uri or not uri.startswith("s3://"):
@@ -60,7 +63,6 @@ ARTIFACTS_DIR = os.path.join(WORKING_DIR, "artifacts")
 _ARTIFACT_EXT = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"})
 
 _mpl_runtime_ready = False
-
 
 def _ensure_cli_scripts_on_path() -> None:
     """Prepend pip user script dir so CLIs (e.g. browser-use) resolve in subprocess."""
@@ -347,7 +349,6 @@ def upload_file_to_s3(filepath: str) -> str:
         import boto3
         from urllib import parse as url_parse
 
-        s3_bucket = config.get("s3_bucket")
         if not s3_bucket:
             return "S3 bucket is not configured."
 
@@ -504,7 +505,7 @@ def bash(command: str) -> str:
 def get_builtin_tools() -> list:
     """Return the list of built-in tools for the skill-aware agent."""
 
-    if config.get("s3_bucket"):
+    if s3_bucket:
         return [execute_code, write_file, read_file, bash, upload_file_to_s3, get_current_time]
     else:
         return [execute_code, write_file, read_file, bash, get_current_time]
@@ -776,47 +777,41 @@ def load_multiple_mcp_server_parameters(mcp_json: dict):
                 }
     return server_info
 
-async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Optional[str]=None, history_mode: str="Disable", containers: Optional[dict]=None) -> tuple[str, list]:
-    chat.index = 0
-    chat.streaming_index = 0
-
-    image_url = []
-    references = []
-    tools = []
-
+async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[str, list]:
+    # builtin tools
+    tools = get_builtin_tools()
+    logger.info(f"builtin_tools count: {len(tools)}")
+        
     # mcp
     mcp_json = mcp_config.load_selected_config(mcp_servers)
-    logger.info(f"mcp_json: {mcp_json}")
+    # logger.info(f"mcp_json: {mcp_json}")
 
     server_params = load_multiple_mcp_server_parameters(mcp_json)
-    logger.info(f"server_params: {server_params}")    
+    # logger.info(f"server_params: {server_params}")    
 
     try:
         client = MultiServerMCPClient(server_params)
-        logger.info(f"MCP client created successfully")
+        logger.info(f"MCP client is initialized successfully")
         
-        tools.extend(await client.get_tools())        
-        # logger.info(f"get_tools() returned: {tools}")
-
-        # skill
-        builtin_tools = get_builtin_tools()
-        # logger.info(f"builtin_tools: {builtin_tools}")
-        skill_tools = skill.get_skill_tools()
-
+        mcp_tools = await client.get_tools()        # add MCP tools
+        # logger.info(f"mcp_tools: {mcp_tools}")        
+        for tool in mcp_tools:
+            logger.info(f"mcp_tool: {tool.name}")
+            if tool.name not in tools:
+                tools.append(tool)
+            else:
+                logger.info(f"mcp_tool of {tool.name} already in tools")
+        
         if chat.skill_mode == "Enable":        
-            tool_names = {tool.name for tool in tools}
-            for bt in builtin_tools:
-                if bt.name not in tool_names:
-                    tools.append(bt)
-                else:
-                    logger.info(f"builtin_tool {bt.name} already in tools")
-            
+            skill_tools = skill.get_skill_tools()
+            logger.info(f"skill_tools count: {len(skill_tools)}")
+
             tool_names = {tool.name for tool in tools}
             for st in skill_tools:
                 if st.name not in tool_names:
                     tools.append(st)
                 else:
-                    logger.info(f"skill_tool {st.name} already in tools")
+                    logger.info(f"skill_tool of {st.name} already in tools")
 
         if tools is None:
             logger.error("tools is None - MCP client failed to get tools")
@@ -833,10 +828,7 @@ async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Option
     # If no tools available, use general conversation
     if not tools:
         logger.warning("No tools available, using general conversation mode")
-        result = "MCP 설정을 확인하세요."
-        if containers is not None:
-            containers['notification'][0].markdown(result)
-        return result, image_url
+        return None, None
     
     if history_mode == "Enable":
         app = buildChatAgentWithHistory(tools)
@@ -844,7 +836,7 @@ async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Option
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "plugin_name": plugin_name,
+            "plugin_name": "base",
             "system_prompt": None
         }
     else:
@@ -853,10 +845,28 @@ async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Option
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "plugin_name": plugin_name,
+            "plugin_name": "base",
             "system_prompt": None
         }        
     
+    return app, config
+
+app = config = None
+active_mcp_servers = []
+
+async def run_langgraph_agent(query: str, mcp_servers: list, plugin_name: Optional[str]=None, history_mode: str="Disable", containers: Optional[dict]=None) -> tuple[str, list]:
+    global app, config, active_mcp_servers
+
+    chat.index = 0
+    chat.streaming_index = 0
+
+    image_url = []
+    references = []
+
+    if mcp_servers != active_mcp_servers:
+        active_mcp_servers = mcp_servers
+        app, config = await create_agent(mcp_servers, history_mode)
+        
     inputs = {
         "messages": [HumanMessage(content=query)]
     }
