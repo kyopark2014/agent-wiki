@@ -3977,8 +3977,8 @@ def main():
     
     try:
         # 1. Create secrets
-        secret_arns = create_secrets()
-        logger.info(f"Secrets created...")
+        # secret_arns = create_secrets()
+        # logger.info(f"Secrets created...")
         
         # 2. Create S3 bucket
         s3_bucket_name = create_s3_bucket()
