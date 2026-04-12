@@ -106,6 +106,19 @@ pip install graphifyy && graphify install
 /graphify /Documents/Docs --update
 ```
 
+### PowerPoint 파일 추가하기
+
+Graphify는 powerpoint 파일을 지원하지 않으므로 pdf로 변환하여 활용합니다. 이를 위해 아래와 같이 libreoffice를 설치합니다.
+
+```bash
+brew install --cask libreoffice
+```
+
+이후 대화창에 아래와 같이 폴더를 지정하고, pdf로 변환을 요청합니다.
+
+```bash
+/Downloads/Docs/AgenticAI의 ppt들을 pdf로 변환하세요. 이미 pdf가 있다면 skip 하세요.
+```
 
 ## 실행 결과
 
