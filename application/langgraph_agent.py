@@ -515,7 +515,7 @@ def get_builtin_tools() -> list:
 # ═══════════════════════════════════════════════════════════════════
 class State(TypedDict):
     messages: Annotated[list, add_messages]
-    image_url: list
+    artifacts: list
 
 BASE_SYSTEM_PROMPT = (
     "당신의 이름은 서연이고, 질문에 친근한 방식으로 대답하도록 설계된 대화형 AI입니다.\n"
@@ -567,7 +567,7 @@ async def call_model(state: State, config):
     last_message = state['messages'][-1]
     # logger.info(f"last message: {last_message}")
 
-    image_url = state.get('image_url', [])
+    artifacts = state.get('artifacts', [])
 
     tools = config.get("configurable", {}).get("tools")
     system = config.get("configurable", {}).get("system_prompt")
@@ -619,7 +619,7 @@ async def call_model(state: State, config):
         err_msg = traceback.format_exc()
         logger.info(f"error message: {err_msg}")
 
-    return {"messages": [response], "image_url": image_url}
+    return {"messages": [response], "artifacts": artifacts}
 
 
 async def should_continue(state: State, config) -> Literal["continue", "end"]:
@@ -843,7 +843,7 @@ async def run_langgraph_agent(query: str, mcp_servers: list, history_mode: str="
     chat.index = 0
     chat.streaming_index = 0
 
-    image_url = []
+    artifacts = []
     references = []
 
     selected_skill_info = skill.selected_skill_info("base")
@@ -925,7 +925,7 @@ async def run_langgraph_agent(query: str, mcp_servers: list, history_mode: str="
                 logger.info(f"refs: {refs}")
             if urls:
                 for url in urls:
-                    image_url.append(url)
+                    artifacts.append(url)
                 logger.info(f"urls: {urls}")
 
             if content:
@@ -945,4 +945,4 @@ async def run_langgraph_agent(query: str, mcp_servers: list, history_mode: str="
     if containers is not None:
         containers['notification'][chat.index].markdown(result)
     
-    return result, image_url
+    return result, artifacts
