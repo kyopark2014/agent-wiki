@@ -166,13 +166,13 @@ def selected_skill_info(plugin_name: str) -> list:
         skill_list = config.get("plugin_skills", {}).get(plugin_name) or []
     logger.info(f"plugin_name: {plugin_name}, skill_list: {skill_list}")
 
-    skill_info = available_skill_info(plugin_name)
+    plugin_skill_info = available_skill_info(plugin_name)
 
-    selected_skill_info = []
-    for s in skill_info:
+    skill_info = []
+    for s in plugin_skill_info:
         if s["name"] in skill_list:
-            selected_skill_info.append(s)
-    return selected_skill_info
+            skill_info.append(s)
+    return skill_info
 
 
 SKILL_SYSTEM_PROMPT = (

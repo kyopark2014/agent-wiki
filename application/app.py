@@ -9,6 +9,7 @@ import os
 import asyncio
 import langgraph_agent
 import skill
+from notification_queue import NotificationQueue
 
 logging.basicConfig(
     level=logging.INFO,  # Default to INFO level
@@ -330,7 +331,7 @@ if prompt := st.chat_input("메시지를 입력하세요."):
                 containers = {
                     "tools": st.empty(),
                     "status": st.empty(),
-                    "notification": [st.empty() for _ in range(500)]
+                    "queue": NotificationQueue(container=status),
                 }
 
                 response, artifacts = asyncio.run(langgraph_agent.run_langgraph_agent(

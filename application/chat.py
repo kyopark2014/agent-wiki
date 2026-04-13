@@ -1229,34 +1229,22 @@ def extract_thinking_tag(response, st):
 
     return msg
 
-streaming_index = None
-index = 0
 def add_notification(containers, message):
-    global index
-
-    if index == streaming_index:
-        index += 1
-
     if containers is not None:
-        containers['notification'][index].info(message)
-    index += 1
+        containers['queue'].notify(message)
 
-def update_streaming_result(containers, message, type):
-    global streaming_index
-    streaming_index = index
-
+def update_streaming_result(containers, message, type="markdown"):
     if containers is not None:
         if type == "markdown":
-            containers['notification'][streaming_index].markdown(message)
+            containers['queue'].stream(message)
         elif type == "info":
-            containers['notification'][streaming_index].info(message)
-def update_tool_notification(containers, tool_index, message):
-    if containers is not None:
-        containers['notification'][tool_index].info(message)
+            containers['queue'].notify(message)
 
-tool_info_list = dict()
+def update_final_result(containers, message):
+    if containers is not None:
+        containers['queue'].result(message)
+
 tool_input_list = dict()
-tool_name_list = dict()
 
 sharing_url = config["sharing_url"] if "sharing_url" in config else None
 s3_prefix = "docs"
