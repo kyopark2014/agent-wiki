@@ -36,7 +36,7 @@ RUN npx -y mcp-server-fetch-typescript --version 2>/dev/null || true && \
     npx playwright install --with-deps chromium
 
 # Install Python packages
-RUN pip install streamlit streamlit-chat
+RUN pip install streamlit streamlit-chat streamlit_paste_button
 RUN pip install boto3 langchain_aws langchain langchain_community langgraph langchain_experimental langgraph-supervisor langgraph-swarm langchain-text-splitters
 RUN pip install mcp langchain-mcp-adapters
 RUN pip install pandas numpy
