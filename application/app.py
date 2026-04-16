@@ -322,17 +322,13 @@ if prompt := st.chat_input("메시지를 입력하세요."):
                 history_mode = "Enable"
 
             with st.status("thinking...", expanded=True, state="running") as status:
-                containers = {
-                    "tools": st.empty(),
-                    "status": st.empty(),
-                    "queue": NotificationQueue(container=status),
-                }
+                notification_queue = NotificationQueue(container=status)
 
                 response, artifacts = asyncio.run(langgraph_agent.run_langgraph_agent(
                     query=prompt, 
                     mcp_servers=mcp_servers, 
                     history_mode=history_mode, 
-                    containers=containers))
+                    notification_queue=notification_queue))
 
             st.session_state.messages.append({
                 "role": "assistant", 
