@@ -18,6 +18,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.prompts import MessagesPlaceholder, ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_core.messages.base import BaseMessage, BaseMessageChunk
 from pytz import timezone
 from langchain_core.tools import tool
 from urllib import parse
@@ -558,6 +559,25 @@ def build_system_prompt(custom_prompt: Optional[str] = None, plugin_name: Option
 
     return base
 
+def message_chunk_to_message(chunk: BaseMessage) -> BaseMessage:
+    """Convert a message chunk to a `Message`.
+
+    Args:
+        chunk: Message chunk to convert.
+
+    Returns:
+        Message.
+    """
+    if not isinstance(chunk, BaseMessageChunk):
+        return chunk
+    # chunk classes always have the equivalent non-chunk class as their first parent
+    ignore_keys = ["type"]
+    if isinstance(chunk, AIMessageChunk):
+        ignore_keys.extend(["tool_call_chunks", "chunk_position"])
+    return chunk.__class__.__mro__[1](
+        **{k: v for k, v in chunk.__dict__.items() if k not in ignore_keys}
+    )
+
 # ═══════════════════════════════════════════════════════════════════
 #  LangGraph Nodes
 # ═══════════════════════════════════════════════════════════════════
@@ -611,7 +631,21 @@ async def call_model(state: State, config):
         ])
         chain = prompt | model
 
-        response = await chain.ainvoke({"messages": messages})
+        # Stream tokens/chunks to the graph via astream (use with stream_mode="messages")
+        accumulated: AIMessageChunk | None = None
+        async for chunk in chain.astream({"messages": messages}):
+            if accumulated is None:
+                accumulated = chunk
+            else:
+                accumulated = accumulated + chunk
+
+        if accumulated is None:
+            response = AIMessage(content="답변을 찾지 못하였습니다.")
+        else:
+            merged = message_chunk_to_message(accumulated)
+            response = merged if isinstance(merged, AIMessage) else AIMessage(
+                content=getattr(merged, "content", str(merged))
+            )
         logger.info(f"response of call_model: {response}")
 
     except Exception:
