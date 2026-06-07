@@ -19,6 +19,74 @@ OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구�
 | 장기 비전 | 합성 데이터 생성 + 파인튜닝 → 모델 가중치에 코퍼스 내재화 |
 
 
+## Operation Architecture
+
+```mermaid
+flowchart TB
+  subgraph UI["Streamlit (app.py)"]
+    M["모드: 일상적인 대화 / Agent / Agent (Chat) / 이미지 분석"]
+    SKUI[Skill 선택 / MCP 선택 / Skill Mode]
+  end
+
+  subgraph LLM["Amazon Bedrock (chat.py)"]
+    CB[ChatBedrock]
+    BR[Bedrock Runtime]
+  end
+
+  subgraph Skills["Agent Skills (skill.py)"]
+    SRC["skills/*/SKILL.md"]
+    BSP[build_skill_prompt]
+    GSI[get_skill_instructions]
+  end
+
+  subgraph LangGraphStack["LangGraph Agent (langgraph_agent.py)"]
+    RLA[run_langgraph_agent]
+    SG["StateGraph: agent ↔ action"]
+    BN["Built-in: execute_code, write_file, read_file, bash, get_current_time, upload_file_to_s3"]
+    MCP[MultiServerMCPClient]
+    MEM["Agent (Chat): MemorySaver + InMemoryStore"]
+  end
+
+  subgraph MCPServers["MCP Servers (mcp_config.py)"]
+    AWS[aws documentation]
+    DR[drawio / aws-drawio]
+    WF[web_fetch]
+    OB[obsidian]
+    BU[browser-use]
+    KW[korea_weather]
+  end
+
+  subgraph Storage["Artifacts / S3"]
+    ART[artifacts/]
+    S3[(S3)]
+  end
+
+  M -->|일상적인 대화| CB
+  M -->|Agent / Agent Chat| RLA
+  M -->|이미지 분석| CB
+  SKUI -->|default_skills| BSP
+
+  RLA --> SG
+  SG --> CB
+  CB --> BR
+  SG --> BN
+  SG --> MCP
+  SG --> GSI
+  BSP -->|system_prompt| SG
+  GSI --> SRC
+  MCP --> MCPServers
+  BN --> ART
+  BN --> S3
+  RLA -->|history_mode=Enable| MEM
+```
+
+| 모드 | 모듈 | 설명 |
+|------|------|------|
+| 일상적인 대화 | `chat.general_conversation` | 대화 이력 + `ChatBedrock` 스트리밍 (Reasoning 옵션 지원) |
+| **Agent** | `langgraph_agent.run_langgraph_agent` | LangGraph ReAct 루프 + Built-in 도구 + MCP + Skills (`history_mode=Disable`) |
+| **Agent (Chat)** | `langgraph_agent.run_langgraph_agent` | Agent와 동일하되 `MemorySaver`로 세션 대화 이력 유지 (`history_mode=Enable`) |
+| 이미지 분석 | `chat.summarize_image` | `ChatBedrock` 멀티모달 (이미지 + 텍스트) 분석 |
+
 
 ## ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
 
