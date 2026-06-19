@@ -74,6 +74,7 @@ with st.sidebar:
         "aws documentation", 
         "drawio",
         "aws-drawio",
+        "websearch",
         "web_fetch",
         "obsidian",
         "browser-use",
@@ -106,7 +107,7 @@ with st.sidebar:
 
         # Change radio to checkbox        
         mcp_selections = {}
-        default_selections = ["web_fetch"]
+        default_selections = ["web_fetch", "websearch"]
         
         with st.expander("MCP 옵션 선택", expanded=True):
             for option in mcp_options:

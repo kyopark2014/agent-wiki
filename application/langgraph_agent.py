@@ -7,6 +7,7 @@ import chat
 import utils
 import skill
 import mcp_config
+import agentcore_sigv4_auth
 import datetime
 
 from typing import Literal, Optional
@@ -788,11 +789,17 @@ def load_multiple_mcp_server_parameters(mcp_json: dict):
     if mcpServers is not None:
         for server_name, cfg in mcpServers.items():
             if cfg.get("type") in ("streamable_http", "http"):
-                server_info[server_name] = {
+                connection = {
                     "transport": "streamable_http",
                     "url": cfg.get("url"),
                     "headers": cfg.get("headers", {})
                 }
+                if cfg.get("auth_type") == "aws_sigv4":
+                    connection["auth"] = agentcore_sigv4_auth.AgentCoreSigV4Auth(
+                        region=cfg.get("auth_region", "us-east-1"),
+                        service=cfg.get("auth_service", "bedrock-agentcore"),
+                    )
+                server_info[server_name] = connection
             else:
                 server_info[server_name] = {
                     "transport": "stdio",
