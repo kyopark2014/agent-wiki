@@ -582,6 +582,21 @@ def message_chunk_to_message(chunk: BaseMessage) -> BaseMessage:
 # ═══════════════════════════════════════════════════════════════════
 #  LangGraph Nodes
 # ═══════════════════════════════════════════════════════════════════
+MAX_CONTEXT_TURNS = 5
+
+
+def trim_messages_by_human_turns(messages: list, max_turns: int) -> list:
+    """Keep messages from the last N HumanMessage turns (inclusive)."""
+    if max_turns <= 0 or not messages:
+        return messages
+
+    human_indices = [i for i, msg in enumerate(messages) if isinstance(msg, HumanMessage)]
+    if len(human_indices) <= max_turns:
+        return messages
+
+    return messages[human_indices[-max_turns]:]
+
+
 async def call_model(state: State, config):
     logger.info(f"###### call_model ######")
 
@@ -625,6 +640,19 @@ async def call_model(state: State, config):
                 messages.append(tool_msg)
             else:
                 messages.append(msg)
+
+        max_turns = (
+            config.get("configurable", {}).get("max_turns")
+            or config.get("max_turns")
+            or MAX_CONTEXT_TURNS
+        )
+        trimmed = trim_messages_by_human_turns(messages, max_turns)
+        if len(trimmed) < len(messages):
+            logger.info(
+                f"trimmed messages from {len(messages)} to {len(trimmed)} "
+                f"(max_turns={max_turns})"
+            )
+            messages = trimmed
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", system),
@@ -861,7 +889,8 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "system_prompt": system_prompt
+            "system_prompt": system_prompt,
+            "max_turns": MAX_CONTEXT_TURNS,
         }
     else:
         app = buildChatAgent(tools)
@@ -869,7 +898,8 @@ async def create_agent(mcp_servers: list, history_mode: str="Disable") -> tuple[
             "recursion_limit": 100,
             "configurable": {"thread_id": user_id},
             "tools": tools,
-            "system_prompt": system_prompt
+            "system_prompt": system_prompt,
+            "max_turns": MAX_CONTEXT_TURNS,
         }        
     
     return app, config
