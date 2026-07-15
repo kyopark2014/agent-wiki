@@ -283,7 +283,6 @@ def _build_openai_chat(profile: dict, max_output_tokens: int):
         client=boto3_bedrock,
         model_kwargs={
             "max_tokens": max_output_tokens,
-            "temperature": 0.1,
         },
         region_name=bedrock_region,
     )
