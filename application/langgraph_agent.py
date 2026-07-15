@@ -1104,10 +1104,18 @@ def _format_references_markdown(references: list) -> str:
         title = _sanitize_reference_text(reference.get("title") or "Untitled", 120)
         content = _sanitize_reference_text(reference.get("content") or "", 100)
         url = (reference.get("url") or "").strip()
+        page = reference.get("page")
+        page_suffix = f" , {page} page" if page is not None else ""
         if url:
-            lines.append(f"{i}. [{title}]({url}) — {content}" if content else f"{i}. [{title}]({url})")
+            lines.append(
+                f"{i}. [{title}]({url}){page_suffix} — {content}" if content
+                else f"{i}. [{title}]({url}){page_suffix}"
+            )
         else:
-            lines.append(f"{i}. {title} — {content}" if content else f"{i}. {title}")
+            lines.append(
+                f"{i}. {title}{page_suffix} — {content}" if content
+                else f"{i}. {title}{page_suffix}"
+            )
     return "\n".join(lines) + "\n"
 
 
