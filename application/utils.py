@@ -20,6 +20,7 @@ aws_session_token = os.environ.get('AWS_SESSION_TOKEN')
 
 workingDir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(workingDir, "config.json")
+favorite_tools_path = os.path.join(os.path.dirname(config_path), "favorite_tools.json")
     
 def load_config():
     config = None
@@ -45,6 +46,56 @@ def load_config():
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)    
     return config
+
+
+
+def load_favorite_tools() -> dict[str, list[str]]:
+    """Load favorite tool defaults for initial selections."""
+    fallback = {"MCP": [], "SKILL": []}
+    try:
+        with open(favorite_tools_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        logger.warning("favorite_tools.json not found: %s", favorite_tools_path)
+        return fallback
+    except Exception as e:
+        logger.warning("Failed to load favorite_tools.json: %s", e)
+        return fallback
+
+    if not isinstance(data, dict):
+        return fallback
+
+    favorites: dict[str, list[str]] = {}
+    for key in ("MCP", "SKILL"):
+        values = data.get(key, [])
+        if isinstance(values, list):
+            favorites[key] = [v for v in values if isinstance(v, str) and v.strip()]
+        else:
+            favorites[key] = []
+    return favorites
+
+
+def save_favorite_tools(
+    *, skills: list[str] | None = None, mcp_servers: list[str] | None = None
+) -> dict[str, list[str]]:
+    """Persist favorite tool defaults in favorite_tools.json."""
+    favorites = load_favorite_tools()
+    if skills is not None:
+        favorites["SKILL"] = [v for v in skills if isinstance(v, str) and v.strip()]
+    if mcp_servers is not None:
+        favorites["MCP"] = [v for v in mcp_servers if isinstance(v, str) and v.strip()]
+
+    with open(favorite_tools_path, "w", encoding="utf-8") as f:
+        json.dump(favorites, f, ensure_ascii=False, indent=2)
+    return favorites
+
+
+def get_initial_tool_defaults() -> tuple[list[str], list[str]]:
+    """Return initial skill/MCP defaults from favorite_tools.json."""
+    favorite_tools = load_favorite_tools()
+    default_skills = favorite_tools.get("SKILL") or []
+    default_mcp_servers = favorite_tools.get("MCP") or []
+    return default_skills, default_mcp_servers
 
 config = load_config()
 
