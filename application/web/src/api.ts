@@ -77,42 +77,45 @@ export interface GraphStatus {
   user_id: string;
   exists: boolean;
   path: string | null;
-  status: "idle" | "queued" | "running" | "ready" | "error" | "skipped_cooldown" | string;
+  status: "idle" | "queued" | "running" | "ready" | "error" | "skipped_cooldown" | "disabled" | string;
+  enabled?: boolean;
   error?: string | null;
   last_success_at?: string | null;
   cooldown_seconds?: number;
   next_eligible_at?: string | null;
 }
 
+export interface SessionInfo {
+  user_id: string;
+  name?: string | null;
+  picture?: string | null;
+  llm_gateway_ready?: boolean;
+  knowledge_graph_enabled?: boolean;
+}
+
 export const api = {
-  getSession: () =>
-    request<{ user_id: string; llm_gateway_ready?: boolean } | null>("/api/session"),
+  getSession: () => request<SessionInfo | null>("/api/session"),
   setSession: (credential: string) =>
-    request<{
-      user_id: string;
-      name?: string | null;
-      picture?: string | null;
-      llm_gateway_ready?: boolean;
-    }>("/api/session", {
+    request<SessionInfo>("/api/session", {
       method: "POST",
       body: JSON.stringify({ credential }),
     }),
   setSessionWithAccessToken: (access_token: string) =>
-    request<{
-      user_id: string;
-      name?: string | null;
-      picture?: string | null;
-      llm_gateway_ready?: boolean;
-    }>("/api/session", {
+    request<SessionInfo>("/api/session", {
       method: "POST",
       body: JSON.stringify({ access_token }),
     }),
   setLocalSession: (user_id: string) =>
-    request<{ user_id: string; llm_gateway_ready?: boolean }>("/api/session", {
+    request<SessionInfo>("/api/session", {
       method: "POST",
       body: JSON.stringify({ user_id }),
     }),
   clearSession: () => request<void>("/api/session", { method: "DELETE" }),
+  patchSessionSettings: (body: { knowledge_graph_enabled?: boolean }) =>
+    request<SessionInfo>("/api/session/settings", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   getGraphStatus: () => request<GraphStatus>("/api/graph/status"),
   rebuildGraph: (force = false) =>
     request<GraphStatus>(`/api/graph/rebuild${force ? "?force=1" : ""}`, {

@@ -245,3 +245,25 @@ export function AppearanceIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+export function KnowledgeGraphIcon({ className }: IconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.15"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="4" cy="4" r="1.75" />
+      <circle cx="12" cy="4.5" r="1.75" />
+      <circle cx="8" cy="12" r="1.75" />
+      <path d="M5.4 5.1 10.6 5.4" />
+      <path d="M4.7 5.7 7.2 10.5" />
+      <path d="M11.3 6.1 8.8 10.5" />
+    </svg>
+  );
+}

@@ -1,9 +1,11 @@
-"""Background knowledge-graph pipeline jobs triggered after session confirm."""
+"""Background knowledge-graph pipeline jobs triggered after chat / login / rebuild."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -17,6 +19,7 @@ logger = logging.getLogger("graph_jobs")
 _APPLICATION_DIR = Path(__file__).resolve().parent
 _GRAPH_DIR = _APPLICATION_DIR.parent / "graph"
 _DEFAULT_COOLDOWN = 600
+_FINGERPRINT_NAME = ".graph_source_fingerprint.json"
 
 _lock = threading.Lock()
 _pipeline_lock = threading.Lock()
@@ -41,7 +44,7 @@ def _now() -> datetime:
 @dataclass
 class GraphJobState:
     user_id: str
-    status: str = "idle"  # idle|queued|running|ready|error|skipped_cooldown
+    status: str = "idle"  # idle|queued|running|ready|error|skipped_cooldown|skipped_unchanged
     error: str | None = None
     last_success_at: datetime | None = None
     started_at: datetime | None = None
@@ -89,8 +92,86 @@ def _in_cooldown(state: GraphJobState) -> bool:
     return (_now() - state.last_success_at) < timedelta(seconds=cooldown)
 
 
+def _fingerprint_path(user_id: str) -> Path:
+    from application import utils
+
+    return Path(utils.get_user_graph_dir(user_id)) / "out" / _FINGERPRINT_NAME
+
+
+def _compute_source_fingerprint(user_id: str) -> dict[str, Any]:
+    """Return {message_count, max_created_at} for the user's tasks.db messages."""
+    from application.task_store_persistence import working_db_path
+
+    db_path = working_db_path()
+    message_count = 0
+    max_created_at: str | None = None
+    if os.path.isfile(db_path):
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(m.id), MAX(m.created_at)
+                    FROM messages m
+                    JOIN tasks t ON t.id = m.task_id
+                    WHERE t.user_id = ?
+                    """,
+                    (user_id,),
+                ).fetchone()
+            if row:
+                message_count = int(row[0] or 0)
+                max_created_at = row[1]
+        except sqlite3.Error:
+            logger.exception("Failed to compute graph source fingerprint for %s", user_id)
+    return {
+        "user_id": user_id,
+        "message_count": message_count,
+        "max_created_at": max_created_at,
+    }
+
+
+def _load_fingerprint(user_id: str) -> dict[str, Any] | None:
+    path = _fingerprint_path(user_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Invalid graph fingerprint at %s", path)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _save_fingerprint(user_id: str, fingerprint: dict[str, Any]) -> None:
+    path = _fingerprint_path(user_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(fingerprint, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.exception("Failed to save graph fingerprint for %s", user_id)
+
+
+def _source_unchanged(user_id: str) -> bool:
+    """True when graph.html exists and tasks.db fingerprint matches last extract."""
+    from application import utils
+
+    html = Path(utils.user_graph_html_path(user_id))
+    if not html.is_file():
+        return False
+    stored = _load_fingerprint(user_id)
+    if stored is None:
+        return False
+    current = _compute_source_fingerprint(user_id)
+    return (
+        stored.get("message_count") == current.get("message_count")
+        and stored.get("max_created_at") == current.get("max_created_at")
+    )
+
+
 def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
-    """Start a background pipeline for user_id unless running or in cooldown.
+    """Start a background pipeline for user_id unless running, unchanged, or in cooldown.
 
     Returns the current job status dict. Never blocks on the pipeline itself.
     """
@@ -98,10 +179,33 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
     if not user_id:
         return {"status": "idle", "error": "missing user_id"}
 
+    try:
+        from application import utils
+
+        if not utils.is_knowledge_graph_enabled(user_id):
+            logger.info("Knowledge Graph disabled for %s — skip ensure_graph_job", user_id)
+            return {
+                "status": "disabled",
+                "error": None,
+                "enabled": False,
+            }
+    except Exception:
+        logger.exception("Failed to read Knowledge Graph setting for %s", user_id)
+
     with _lock:
         state = _get_or_create(user_id)
         if user_id in _running_users or state.status in ("running", "queued"):
             logger.info("Graph job already running for %s — skip", user_id)
+            return state.to_dict()
+
+        if not force and _source_unchanged(user_id):
+            state.status = "skipped_unchanged"
+            state.error = None
+            state.updated_at = _now()
+            logger.info(
+                "Graph source unchanged for %s — skip pipeline",
+                user_id,
+            )
             return state.to_dict()
 
         if not force and _in_cooldown(state):
@@ -157,6 +261,8 @@ def _run_pipeline(user_id: str) -> None:
             ]
             logger.info("+ %s (cwd=%s)", " ".join(cmd), _GRAPH_DIR)
             subprocess.check_call(cmd, cwd=str(_GRAPH_DIR))
+        fingerprint = _compute_source_fingerprint(user_id)
+        _save_fingerprint(user_id, fingerprint)
         with _lock:
             state = _get_or_create(user_id)
             now = _now()

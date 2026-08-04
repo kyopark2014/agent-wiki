@@ -128,6 +128,61 @@ def user_graph_html_path(user_id: str | None) -> str:
     return os.path.join(SESSION_STORAGE_DIR, segment, "graph", "out", "graph.html")
 
 
+_DEFAULT_USER_SETTINGS: dict[str, bool] = {
+    "knowledge_graph_enabled": True,
+}
+
+
+def get_user_settings_path(user_id: str | None) -> str:
+    """Absolute path to {SESSION_STORAGE_DIR}/{user_id}/settings.json (does not create)."""
+    segment = sanitize_user_path_segment(user_id) or "default"
+    return os.path.join(SESSION_STORAGE_DIR, segment, "settings.json")
+
+
+def load_user_settings(user_id: str | None) -> dict[str, bool]:
+    """Load per-user UI/feature settings. Missing file → defaults (KG on)."""
+    settings = dict(_DEFAULT_USER_SETTINGS)
+    path = get_user_settings_path(user_id)
+    if not os.path.isfile(path):
+        return settings
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            if "knowledge_graph_enabled" in raw:
+                settings["knowledge_graph_enabled"] = bool(raw["knowledge_graph_enabled"])
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Failed to load user settings %s: %s", path, e)
+    return settings
+
+
+def save_user_settings(user_id: str | None, **updates: bool) -> dict[str, bool]:
+    """Merge updates into per-user settings.json and return the full settings."""
+    segment = sanitize_user_path_segment(user_id)
+    if not segment:
+        raise ValueError(
+            "Invalid user_id for settings path; expected a plain user id, "
+            "not a signed session cookie"
+        )
+    user_dir = os.path.join(SESSION_STORAGE_DIR, segment)
+    os.makedirs(user_dir, exist_ok=True)
+    settings = load_user_settings(user_id)
+    for key, value in updates.items():
+        if key in _DEFAULT_USER_SETTINGS:
+            settings[key] = bool(value)
+    path = get_user_settings_path(user_id)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    logger.info("user settings saved: %s -> %s", path, settings)
+    return settings
+
+
+def is_knowledge_graph_enabled(user_id: str | None) -> bool:
+    """True when Knowledge Graph feature is on (default)."""
+    return bool(load_user_settings(user_id).get("knowledge_graph_enabled", True))
+
+
 def get_user_skills_list_path(user_id: str | None) -> str:
     """Absolute path to {SESSION_STORAGE_DIR}/{user_id}/skills.list (does not create)."""
     segment = sanitize_user_path_segment(user_id) or "default"

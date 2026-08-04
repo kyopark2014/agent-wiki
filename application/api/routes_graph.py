@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from application.api.routes_auth import require_user_id
@@ -22,18 +22,22 @@ def user_graph_html_path(user_id: str) -> Path:
 @router.get("/status")
 def graph_status(request: Request) -> dict:
     user_id = require_user_id(request)
+    enabled = utils.is_knowledge_graph_enabled(user_id)
     path = user_graph_html_path(user_id)
     job = get_job_status(user_id)
     exists = path.is_file()
     status = job.get("status") or "idle"
-    if status in ("idle", "skipped_cooldown") and exists:
-        status = "ready" if status == "idle" else status
+    if not enabled:
+        status = "disabled"
+    elif status in ("idle", "skipped_cooldown", "skipped_unchanged") and exists:
+        status = "ready" if status in ("idle", "skipped_unchanged") else status
     return {
         "user_id": user_id,
         "exists": exists,
         "path": path.name if exists else None,
         "storage": str(path.parent),
         "status": status,
+        "enabled": enabled,
         "error": job.get("error"),
         "last_success_at": job.get("last_success_at"),
         "cooldown_seconds": job.get("cooldown_seconds"),
@@ -45,6 +49,11 @@ def graph_status(request: Request) -> dict:
 def rebuild_graph(request: Request, force: bool = Query(False)) -> dict:
     """Enqueue a background pipeline (respects cooldown unless force=true)."""
     user_id = require_user_id(request)
+    if not utils.is_knowledge_graph_enabled(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Knowledge Graph is disabled in Settings",
+        )
     job = ensure_graph_job(user_id, force=force)
     path = user_graph_html_path(user_id)
     return {
@@ -52,6 +61,7 @@ def rebuild_graph(request: Request, force: bool = Query(False)) -> dict:
         "exists": path.is_file(),
         "path": path.name if path.is_file() else None,
         "storage": str(path.parent),
+        "enabled": True,
         **job,
     }
 

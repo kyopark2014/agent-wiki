@@ -287,6 +287,15 @@ def _render_template(payload: dict[str, Any]) -> str:
     padding: 16px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.22) #161b22;
+    transition: width 0.22s ease, padding 0.22s ease, border-color 0.22s ease,
+      opacity 0.18s ease;
+  }}
+  #sidebar.is-collapsed {{
+    width: 0;
+    padding: 0;
+    border-left-color: transparent;
+    opacity: 0;
+    pointer-events: none;
   }}
   #sidebar::-webkit-scrollbar {{
     width: 8px;
@@ -312,6 +321,37 @@ def _render_template(payload: dict[str, Any]) -> str:
     width: 0;
     height: 0;
   }}
+
+  #sidebar-toggle {{
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 3;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(33, 38, 45, 0.95);
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    color: #e6edf3;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+  }}
+  #sidebar-toggle:hover {{
+    background: #30363d;
+    border-color: #FF6B35;
+    color: #FF6B35;
+  }}
+  #sidebar-toggle svg {{
+    width: 18px;
+    height: 18px;
+    display: block;
+  }}
+  #sidebar-toggle .icon-show {{ display: none; }}
+  body.sidebar-collapsed #sidebar-toggle .icon-hide {{ display: none; }}
+  body.sidebar-collapsed #sidebar-toggle .icon-show {{ display: block; }}
 
   .legend-title {{
     font-size: 13px;
@@ -438,6 +478,26 @@ def _render_template(payload: dict[str, Any]) -> str:
       <div class="stat-chip">그룹 <span>{payload["groups"]}</span></div>
     </div>
     <div id="mynetwork"></div>
+    <button
+      type="button"
+      id="sidebar-toggle"
+      aria-controls="sidebar"
+      aria-expanded="true"
+      aria-label="검색·그룹 범례 숨기기"
+      title="검색·그룹 범례 숨기기"
+      onclick="toggleSidebar()"
+    >
+      <svg class="icon-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <path d="M15 4v16"/>
+        <path d="M10 9l-3 3 3 3"/>
+      </svg>
+      <svg class="icon-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <path d="M15 4v16"/>
+        <path d="M8 9l3 3-3 3"/>
+      </svg>
+    </button>
     <div class="controls">
       <button class="ctrl-btn" onclick="network.fit()">전체 보기</button>
       <button class="ctrl-btn" onclick="stabilize()">레이아웃 재정렬</button>
@@ -618,6 +678,23 @@ function filterGroup(group) {{
 function stabilize() {{
   network.startSimulation();
   setTimeout(() => {{ network.stopSimulation(); network.fit(); }}, 2000);
+}}
+
+function toggleSidebar() {{
+  const sidebar = document.getElementById('sidebar');
+  const btn = document.getElementById('sidebar-toggle');
+  const collapsed = !sidebar.classList.contains('is-collapsed');
+  sidebar.classList.toggle('is-collapsed', collapsed);
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const label = collapsed ? '검색·그룹 범례 보이기' : '검색·그룹 범례 숨기기';
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+  // Resize canvas after panel animation
+  setTimeout(() => {{
+    network.redraw();
+    network.fit({{ animation: {{ duration: 250 }} }});
+  }}, 240);
 }}
 
 document.getElementById('search').addEventListener('input', (ev) => {{

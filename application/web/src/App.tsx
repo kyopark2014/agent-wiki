@@ -44,6 +44,7 @@ const LOAD_MESSAGES_ERROR_MESSAGE =
 export default function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [llmGatewayReady, setLlmGatewayReady] = useState(false);
+  const [knowledgeGraphEnabled, setKnowledgeGraphEnabled] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -118,6 +119,7 @@ export default function App() {
         if (boot.userId) {
           setUserId(boot.userId);
           setLlmGatewayReady(boot.llmGatewayReady);
+          setKnowledgeGraphEnabled(boot.knowledgeGraphEnabled);
         }
       } catch (err) {
         uiError("boot failed", err);
@@ -207,6 +209,7 @@ export default function App() {
         const session = await appDataService.setSession(credential);
         setUserId(session.user_id.trim());
         setLlmGatewayReady(Boolean(session.llm_gateway_ready));
+        setKnowledgeGraphEnabled(session.knowledge_graph_enabled ?? true);
         await refreshConfig();
       } catch (err) {
         setBootError(err instanceof Error ? err.message : String(err));
@@ -223,6 +226,7 @@ export default function App() {
           await appDataService.setSessionWithAccessToken(accessToken);
         setUserId(session.user_id.trim());
         setLlmGatewayReady(Boolean(session.llm_gateway_ready));
+        setKnowledgeGraphEnabled(session.knowledge_graph_enabled ?? true);
         await refreshConfig();
       } catch (err) {
         setBootError(err instanceof Error ? err.message : String(err));
@@ -238,6 +242,7 @@ export default function App() {
         const session = await appDataService.setLocalSession(id.trim());
         setUserId(session.user_id.trim());
         setLlmGatewayReady(Boolean(session.llm_gateway_ready));
+        setKnowledgeGraphEnabled(session.knowledge_graph_enabled ?? true);
         await refreshConfig();
       } catch (err) {
         setBootError(err instanceof Error ? err.message : String(err));
@@ -262,6 +267,7 @@ export default function App() {
     emptyTaskBootstrapRef.current = null;
     setUserId(null);
     setLlmGatewayReady(false);
+    setKnowledgeGraphEnabled(true);
     setTasks([]);
     setActiveTaskId(null);
     setMessages([]);
@@ -586,6 +592,20 @@ export default function App() {
         onPatchTask={handlePatchTask}
         onDeleteTask={handleDeleteTask}
         onLogout={handleLogout}
+        knowledgeGraphEnabled={knowledgeGraphEnabled}
+        onPatchKnowledgeGraphEnabled={async (enabled) => {
+          setKnowledgeGraphEnabled(enabled);
+          try {
+            const session = await api.patchSessionSettings({
+              knowledge_graph_enabled: enabled,
+            });
+            setKnowledgeGraphEnabled(session.knowledge_graph_enabled ?? enabled);
+          } catch (err) {
+            setKnowledgeGraphEnabled(!enabled);
+            uiError("knowledge graph setting failed", err);
+            throw err;
+          }
+        }}
         onOpenDashboard={
           config?.is_admin
             ? () => {

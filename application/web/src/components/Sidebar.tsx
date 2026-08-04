@@ -13,6 +13,7 @@ import {
   ChevronIcon,
   DashboardIcon,
   GuardrailIcon,
+  KnowledgeGraphIcon,
   LlmGatewayIcon,
   LogoutIcon,
   McpIcon,
@@ -54,6 +55,8 @@ interface Props {
   onPatchTask: (taskId: string, patch: Partial<Task>) => void | Promise<void>;
   onDeleteTask: (taskId: string) => void;
   onLogout: () => void;
+  knowledgeGraphEnabled?: boolean;
+  onPatchKnowledgeGraphEnabled?: (enabled: boolean) => void | Promise<void>;
   onOpenDashboard?: () => void;
   onRefreshConfig?: () => Promise<AppConfig | void> | AppConfig | void;
 }
@@ -73,6 +76,8 @@ export function Sidebar({
   onPatchTask,
   onDeleteTask,
   onLogout,
+  knowledgeGraphEnabled = true,
+  onPatchKnowledgeGraphEnabled,
   onOpenDashboard,
   onRefreshConfig,
 }: Props) {
@@ -173,10 +178,20 @@ export function Sidebar({
           <div className="brand-row">
             <button
               type="button"
-              className="brand brand-graph-btn"
-              title="Knowledge Graph 보기"
-              aria-label={`${brandTitle} Knowledge Graph 보기`}
+              className={`brand brand-graph-btn${knowledgeGraphEnabled ? "" : " is-disabled"}`}
+              title={
+                knowledgeGraphEnabled
+                  ? "Knowledge Graph 보기"
+                  : "Knowledge Graph가 꺼져 있습니다"
+              }
+              aria-label={
+                knowledgeGraphEnabled
+                  ? `${brandTitle} Knowledge Graph 보기`
+                  : brandTitle
+              }
+              aria-disabled={!knowledgeGraphEnabled}
               onClick={() => {
+                if (!knowledgeGraphEnabled) return;
                 collapseSettings();
                 setKnowledgeGraphOpen(true);
               }}
@@ -347,6 +362,24 @@ export function Sidebar({
                   }}
                 />
               </label>
+              <label className="sidebar-menu-btn settings-toggle">
+                <KnowledgeGraphIcon className="sidebar-icon" />
+                <span>Knowledge Graph</span>
+                <input
+                  type="checkbox"
+                  checked={knowledgeGraphEnabled}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    void (async () => {
+                      try {
+                        await onPatchKnowledgeGraphEnabled?.(enabled);
+                      } finally {
+                        handleSettingApplied();
+                      }
+                    })();
+                  }}
+                />
+              </label>
               <button
                 type="button"
                 className={`sidebar-menu-btn${llmGatewayOpen ? " is-active" : ""}`}
@@ -421,7 +454,7 @@ export function Sidebar({
         />
       )}
 
-      {knowledgeGraphOpen && (
+      {knowledgeGraphOpen && knowledgeGraphEnabled && (
         <KnowledgeGraphModal
           userId={userId}
           title={brandTitle}
