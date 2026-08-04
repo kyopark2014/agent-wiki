@@ -167,10 +167,25 @@ def extract_corpus(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     # graphify.cache defaults to root/graphify-out/cache; flatten to artifact_dir/cache.
+    # graphifyy>=0.9 calls cache_dir(root, kind, prompt_fp) — keep that signature.
     _orig_cache_dir = gc.cache_dir
 
-    def _flat_cache_dir(root: Path = Path(".")) -> Path:
-        d = Path(root).resolve() / "cache"
+    def _flat_cache_dir(
+        root: Path = Path("."),
+        kind: str | None = None,
+        prompt_fp: str | None = None,
+    ) -> Path:
+        base = Path(root).resolve() / "cache"
+        if kind:
+            d = base / str(kind)
+            if kind == "ast":
+                ver = getattr(gc, "_EXTRACTOR_VERSION", None)
+                if ver:
+                    d = d / f"v{ver}"
+            elif prompt_fp:
+                d = d / f"p{prompt_fp}"
+        else:
+            d = base
         d.mkdir(parents=True, exist_ok=True)
         return d
 
