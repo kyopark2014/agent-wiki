@@ -1,4 +1,4 @@
-"""Build NetworkX graph from extraction JSON and write graphify-out artifacts."""
+"""Build NetworkX graph from extraction JSON and write graphify artifacts."""
 
 from __future__ import annotations
 
@@ -9,19 +9,22 @@ from typing import Any
 
 def build_and_export(
     extraction: dict[str, Any],
-    work_root: Path,
+    artifact_dir: Path,
     *,
     corpus_label: str = "corpus",
 ) -> Path:
-    """cluster + graph.json (+ optional GRAPH_REPORT stub). Returns graph.json path."""
+    """cluster + graph.json (+ GRAPH_REPORT). Returns graph.json path.
+
+    ``artifact_dir`` is the output folder (session ``out/`` or legacy ``graphify-out/``).
+    Files are written directly into it (no nested graphify-out/ subfolder).
+    """
     from graphify.build import build_from_json
     from graphify.cluster import cluster, score_all
     from graphify.analyze import god_nodes, surprising_connections, suggest_questions
     from graphify.export import to_json
     from graphify.report import generate
 
-    work_root = work_root.resolve()
-    out = work_root / "graphify-out"
+    out = artifact_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
 
     G = build_from_json(extraction)
@@ -39,7 +42,13 @@ def build_and_export(
         "output": extraction.get("output_tokens", 0),
     }
     detection = {
-        "total_files": len({n.get("source_file") for n in (extraction.get("nodes") or []) if n.get("source_file")}),
+        "total_files": len(
+            {
+                n.get("source_file")
+                for n in (extraction.get("nodes") or [])
+                if n.get("source_file")
+            }
+        ),
         "total_words": 0,
         "files": [],
         "code": 0,

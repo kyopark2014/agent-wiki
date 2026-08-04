@@ -96,6 +96,38 @@ def ensure_user_skills_dir(user_id: str | None) -> str:
     return skills_dir
 
 
+def get_user_graph_dir(user_id: str | None) -> str:
+    """Absolute path to {SESSION_STORAGE_DIR}/{user_id}/graph (does not create)."""
+    segment = sanitize_user_path_segment(user_id)
+    if not segment:
+        segment = "default"
+    return os.path.join(SESSION_STORAGE_DIR, segment, "graph")
+
+
+def ensure_user_graph_dir(user_id: str | None) -> str:
+    """Create session graph workspace: corpus/ + out/ (shared extract+publish).
+
+    Returns the graph root: {SESSION_STORAGE_DIR}/{user_id}/graph
+    """
+    segment = sanitize_user_path_segment(user_id)
+    if not segment:
+        raise ValueError(
+            "Invalid user_id for graph path; expected a plain user id, "
+            "not a signed session cookie"
+        )
+    graph_dir = os.path.join(SESSION_STORAGE_DIR, segment, "graph")
+    for name in ("corpus", "out"):
+        os.makedirs(os.path.join(graph_dir, name), exist_ok=True)
+    logger.info("user graph dir ready: %s", graph_dir)
+    return graph_dir
+
+
+def user_graph_html_path(user_id: str | None) -> str:
+    """Published HTML: {SESSION_STORAGE_DIR}/{user_id}/graph/out/graph.html"""
+    segment = sanitize_user_path_segment(user_id) or "default"
+    return os.path.join(SESSION_STORAGE_DIR, segment, "graph", "out", "graph.html")
+
+
 def get_user_skills_list_path(user_id: str | None) -> str:
     """Absolute path to {SESSION_STORAGE_DIR}/{user_id}/skills.list (does not create)."""
     segment = sanitize_user_path_segment(user_id) or "default"

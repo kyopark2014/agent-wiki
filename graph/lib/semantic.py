@@ -146,87 +146,109 @@ def _dedupe_merge(parts: list[dict[str, Any]]) -> dict[str, Any]:
 
 def extract_corpus(
     corpus_dir: Path,
-    work_root: Path,
+    artifact_dir: Path,
     *,
     deep: bool = False,
     chunk_size: int = 8,
     limit: int | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """Extract semantic graph from corpus/*.md using LiteLLM + optional file cache."""
+    """Extract semantic graph from corpus/*.md using LiteLLM + optional file cache.
+
+    ``artifact_dir`` receives ``.graphify_extract.json`` and ``cache/`` (shared
+    with publish output when using session storage ``out/``).
+    """
+    import graphify.cache as gc
     from graphify.cache import check_semantic_cache, save_semantic_cache
 
     corpus_dir = corpus_dir.resolve()
-    work_root = work_root.resolve()
-    work_root.mkdir(parents=True, exist_ok=True)
-    (work_root / "graphify-out").mkdir(parents=True, exist_ok=True)
+    artifact_dir = artifact_dir.resolve()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    files = sorted(corpus_dir.rglob("*.md"))
-    files = [p for p in files if p.is_file() and p.name != ".gitkeep"]
-    if limit is not None:
-        files = files[:limit]
-    if not files:
-        raise SystemExit(f"No markdown files under {corpus_dir}")
+    # graphify.cache defaults to root/graphify-out/cache; flatten to artifact_dir/cache.
+    _orig_cache_dir = gc.cache_dir
 
-    abs_paths = [str(p.resolve()) for p in files]
-    cached_nodes, cached_edges, cached_hyper, uncached = check_semantic_cache(
-        abs_paths, root=work_root
-    )
-    print(
-        f"Corpus: {len(files)} files · cache hit {len(files) - len(uncached)} · "
-        f"extract {len(uncached)}"
-    )
+    def _flat_cache_dir(root: Path = Path(".")) -> Path:
+        d = Path(root).resolve() / "cache"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
-    _, default_model = make_client()
-    model = model or default_model
-    print(f"LLM: {model}")
+    gc.cache_dir = _flat_cache_dir  # type: ignore[assignment]
 
-    new_parts: list[dict[str, Any]] = []
-    uncached_paths = [Path(p) for p in uncached]
-    chunks = chunk_files(uncached_paths, chunk_size=chunk_size)
-    for i, chunk in enumerate(chunks, 1):
-        names = ", ".join(p.name for p in chunk)
-        print(f"  [{i}/{len(chunks)}] extracting {len(chunk)} file(s): {names[:80]}…")
-        try:
-            part = extract_chunk(
-                chunk,
-                corpus_root=corpus_dir,
-                chunk_num=i,
-                total_chunks=len(chunks),
-                deep=deep,
-                model=model,
-            )
-            new_parts.append(part)
-            # cache per successful chunk
-            save_semantic_cache(
-                part.get("nodes") or [],
-                part.get("edges") or [],
-                part.get("hyperedges") or [],
-                root=work_root,
-            )
-        except Exception as exc:  # noqa: BLE001
-            print(f"  WARNING: chunk {i} failed: {exc}")
+    try:
+        files = sorted(corpus_dir.rglob("*.md"))
+        files = [p for p in files if p.is_file() and p.name != ".gitkeep"]
+        if limit is not None:
+            files = files[:limit]
+        if not files:
+            raise SystemExit(f"No markdown files under {corpus_dir}")
 
-    merged_new = _dedupe_merge(new_parts) if new_parts else {
-        "nodes": [], "edges": [], "hyperedges": [], "input_tokens": 0, "output_tokens": 0
-    }
-    extraction = _dedupe_merge(
-        [
-            {
-                "nodes": cached_nodes,
-                "edges": cached_edges,
-                "hyperedges": cached_hyper,
-                "input_tokens": 0,
-                "output_tokens": 0,
-            },
-            merged_new,
-        ]
-    )
+        abs_paths = [str(p.resolve()) for p in files]
+        cached_nodes, cached_edges, cached_hyper, uncached = check_semantic_cache(
+            abs_paths, root=artifact_dir
+        )
+        print(
+            f"Corpus: {len(files)} files · cache hit {len(files) - len(uncached)} · "
+            f"extract {len(uncached)}"
+        )
 
-    out_path = work_root / "graphify-out" / ".graphify_extract.json"
-    out_path.write_text(json.dumps(extraction, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(
-        f"Extracted: {len(extraction['nodes'])} nodes, {len(extraction['edges'])} edges "
-        f"(tokens in={extraction['input_tokens']} out={extraction['output_tokens']})"
-    )
-    return extraction
+        _, default_model = make_client()
+        model = model or default_model
+        print(f"LLM: {model}")
+
+        new_parts: list[dict[str, Any]] = []
+        uncached_paths = [Path(p) for p in uncached]
+        chunks = chunk_files(uncached_paths, chunk_size=chunk_size)
+        for i, chunk in enumerate(chunks, 1):
+            names = ", ".join(p.name for p in chunk)
+            print(f"  [{i}/{len(chunks)}] extracting {len(chunk)} file(s): {names[:80]}…")
+            try:
+                part = extract_chunk(
+                    chunk,
+                    corpus_root=corpus_dir,
+                    chunk_num=i,
+                    total_chunks=len(chunks),
+                    deep=deep,
+                    model=model,
+                )
+                new_parts.append(part)
+                save_semantic_cache(
+                    part.get("nodes") or [],
+                    part.get("edges") or [],
+                    part.get("hyperedges") or [],
+                    root=artifact_dir,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"  WARNING: chunk {i} failed: {exc}")
+
+        merged_new = _dedupe_merge(new_parts) if new_parts else {
+            "nodes": [],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        extraction = _dedupe_merge(
+            [
+                {
+                    "nodes": cached_nodes,
+                    "edges": cached_edges,
+                    "hyperedges": cached_hyper,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                },
+                merged_new,
+            ]
+        )
+
+        out_path = artifact_dir / ".graphify_extract.json"
+        out_path.write_text(
+            json.dumps(extraction, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(
+            f"Extracted: {len(extraction['nodes'])} nodes, {len(extraction['edges'])} edges "
+            f"(tokens in={extraction['input_tokens']} out={extraction['output_tokens']})"
+        )
+        return extraction
+    finally:
+        gc.cache_dir = _orig_cache_dir  # type: ignore[assignment]

@@ -73,6 +73,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
+export interface GraphStatus {
+  user_id: string;
+  exists: boolean;
+  path: string | null;
+  status: "idle" | "queued" | "running" | "ready" | "error" | "skipped_cooldown" | string;
+  error?: string | null;
+  last_success_at?: string | null;
+  cooldown_seconds?: number;
+  next_eligible_at?: string | null;
+}
+
 export const api = {
   getSession: () =>
     request<{ user_id: string; llm_gateway_ready?: boolean } | null>("/api/session"),
@@ -102,6 +113,11 @@ export const api = {
       body: JSON.stringify({ user_id }),
     }),
   clearSession: () => request<void>("/api/session", { method: "DELETE" }),
+  getGraphStatus: () => request<GraphStatus>("/api/graph/status"),
+  rebuildGraph: (force = false) =>
+    request<GraphStatus>(`/api/graph/rebuild${force ? "?force=1" : ""}`, {
+      method: "POST",
+    }),
   getConfig: () => request<AppConfig>("/api/config"),
   getAdminDashboard: () => request<DashboardStats>("/api/admin/dashboard"),
   getLlmGateway: () =>

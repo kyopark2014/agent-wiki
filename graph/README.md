@@ -48,7 +48,7 @@ Graphify는 대화를 **배치(batch)** 로 읽어 엔티티·관계를 뽑고, 
 | 엔진 | 시맨틱 = LiteLLM + 이 폴더 `lib/semantic.py` / 클러스터·export = **graphifyy** |
 | 입력 | `tasks.db` → turn → 마크다운 **corpus** |
 | 생성 | corpus **배치** (+ 파일 SHA256 캐시) |
-| 저장 | `graphify-out/graph.json`, `out/graph_{user}.html` |
+| 저장 | `out/graph.json`, `out/graph_{user}.html` |
 | 적합 | Neo4j 없이 일괄 분석·시각화·커뮤니티 탐색 |
 
 관계는 Leiden/Louvain이 **계산**하지 않습니다. **LLM이 edge JSON으로 명시한 뒤**, 그 엣지 위에서 커뮤니티만 나눕니다.
@@ -78,7 +78,7 @@ flowchart TB
   EXP --> CORP[corpus/]
   CORP --> EXT[run_extract.py]
   EXT --> LLM[LiteLLM chat/completions]
-  LLM --> GJ[graphify-out/graph.json]
+  LLM --> GJ[out/graph.json]
   GJ --> PUB[publish_out.py]
   PUB --> OUT["out/graph_{user}.html"]
 ```
@@ -86,7 +86,7 @@ flowchart TB
 | 단계 | 스크립트 | LLM? |
 |------|----------|------|
 | 1. DB → corpus | `export_corpus.py` | 없음 |
-| 2. corpus → graph.json | `run_extract.py` | **LiteLLM** (기본 `gpt-5.5`) |
+| 2. corpus → graph.json | `run_extract.py` | **LiteLLM** (기본 `claude-haiku-4-5`) |
 | 3. 사용자별 HTML | `publish_out.py` | 없음 (클러스터 + rich UI) |
 
 한 번에:
@@ -121,7 +121,7 @@ python publish_out.py
 2. **fallback**: `graph/.env`의 `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY`
    (config에 gateway가 없을 때만)
 
-모델은 `GRAPHIFY_LLM_MODEL`(기본 `gpt-5.5`).
+모델은 `GRAPHIFY_LLM_MODEL`(기본 `claude-haiku-4-5`). Claude / GPT / Gemini 등 LiteLLM 게이트웨이 id를 그대로 쓰면 됩니다.
 
 ```bash
 # config.json에 gateway가 없으면:
@@ -147,7 +147,7 @@ agent-wiki/graph/
 ├── requirements.txt
 ├── .env.example
 ├── export_corpus.py       # tasks.db → corpus/
-├── run_extract.py         # corpus → graphify-out/graph.json (LLM)
+├── run_extract.py         # corpus → out/graph.json (LLM)
 ├── publish_out.py         # graph.json → out/graph_{user}.html
 ├── run_pipeline.py        # 위 3단계 일괄
 ├── lib/
@@ -160,8 +160,7 @@ agent-wiki/graph/
 │   ├── out_graphs.py
 │   └── rich_html.py       # agentcore 스타일 HTML
 ├── corpus/                # gitignore
-├── graphify-out/          # gitignore (graph.json, cache/)
-└── out/                   # gitignore
+└── out/                   # gitignore (graph.json, cache/, graph_{user}.html)
 ```
 
 ### HTML UI

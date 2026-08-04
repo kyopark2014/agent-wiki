@@ -72,7 +72,7 @@ flowchart TB
   subgraph Storage["Artifacts / Wiki"]
     ART[artifacts/]
     CONT[contents/]
-    GOUT[graphify-out/]
+    GOUT[graph/out/]
   end
 
   SPA --> API

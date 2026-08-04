@@ -182,6 +182,16 @@ def get_optional_user_id(request: Request) -> str | None:
     return resolve_cookie_user_id(request.cookies.get(SESSION_COOKIE))
 
 
+def _kick_graph_job(user_id: str) -> None:
+    """Fire-and-forget background graph extract (respects cooldown / running lock)."""
+    try:
+        from application.graph_jobs import ensure_graph_job
+
+        ensure_graph_job(user_id)
+    except Exception:
+        logger.exception("Failed to schedule graph job for %s", user_id)
+
+
 @router.post("", response_model=SessionResponse)
 def set_session(body: SessionRequest, request: Request, response: Response) -> SessionResponse:
     credential = (body.credential or "").strip()
@@ -209,6 +219,11 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
         utils.ensure_user_artifacts_dir(user_id)
         utils.ensure_user_skills_dir(user_id)
         utils.ensure_user_skills_list(user_id)
+        try:
+            utils.ensure_user_graph_dir(user_id)
+        except Exception:
+            logger.exception("Failed to ensure graph dir for %s", user_id)
+        _kick_graph_job(user_id)
         logger.info("Google login success: %s (llm_gateway_ready=%s)", user_id, gateway_ready)
         return SessionResponse(
             user_id=user_id,
@@ -227,6 +242,11 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
         utils.ensure_user_artifacts_dir(local_user_id)
         utils.ensure_user_skills_dir(local_user_id)
         utils.ensure_user_skills_list(local_user_id)
+        try:
+            utils.ensure_user_graph_dir(local_user_id)
+        except Exception:
+            logger.exception("Failed to ensure graph dir for %s", local_user_id)
+        _kick_graph_job(local_user_id)
         logger.info(
             "Local auth bypass login: %s (llm_gateway_ready=%s)",
             local_user_id,
@@ -253,6 +273,11 @@ def get_session(request: Request, response: Response) -> SessionResponse | None:
     utils.ensure_user_artifacts_dir(user_id)
     utils.ensure_user_skills_dir(user_id)
     utils.ensure_user_skills_list(user_id)
+    try:
+        utils.ensure_user_graph_dir(user_id)
+    except Exception:
+        logger.exception("Failed to ensure graph dir for %s", user_id)
+    _kick_graph_job(user_id)
     return SessionResponse(user_id=user_id, llm_gateway_ready=_llm_gateway_ready())
 
 

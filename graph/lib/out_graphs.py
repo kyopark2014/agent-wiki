@@ -1,8 +1,9 @@
-"""Split a graphify graph.json by author/user and write out/graph_{user}.html."""
+"""Split a graphify graph.json by author/user and write out/graph.html."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -12,6 +13,13 @@ import networkx as nx
 from networkx.readwrite import json_graph
 
 from lib.corpus import safe_slug
+
+
+def _atomic_write_bytes(dest: Path, data: bytes) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, dest)
 
 
 def _load_graph(path: Path) -> nx.Graph:
@@ -63,22 +71,24 @@ def write_user_graph(
     user_id: str,
     out_dir: Path,
 ) -> dict[str, Path]:
-    """Cluster + export rich HTML/JSON for one user. Returns written paths."""
+    """Cluster + export rich HTML/JSON. Writes out/graph.html (+ graph.json)."""
     from graphify.cluster import cluster
     from graphify.export import to_json
 
     from lib.rich_html import to_rich_html
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = safe_slug(user_id)
-    html_path = out_dir / f"graph_{slug}.html"
-    json_path = out_dir / f"graph_{slug}.json"
+    html_path = out_dir / "graph.html"
+    json_path = out_dir / "graph.json"
 
     if H.number_of_nodes() == 0:
         return {}
 
     communities = cluster(H)
-    to_json(H, communities, str(json_path))
+    # Write JSON via temp so readers never see a partial file.
+    tmp_json = json_path.with_suffix(json_path.suffix + ".tmp")
+    to_json(H, communities, str(tmp_json))
+    os.replace(tmp_json, json_path)
     to_rich_html(
         H,
         communities,
@@ -99,7 +109,7 @@ def publish_user_graphs(
     user: str | None = None,
     min_nodes: int = 1,
 ) -> list[dict[str, Any]]:
-    """Split graph.json by author → out/graph_{user}.html (+ .json)."""
+    """Split graph.json by author → out/graph.html (+ graph.json)."""
     G = _load_graph(graph_json)
     groups = group_nodes_by_user(G)
     results: list[dict[str, Any]] = []
@@ -122,6 +132,9 @@ def publish_user_graphs(
                 **{k: str(v) for k, v in paths.items()},
             }
         )
+        # Per-user out dirs only hold one graph.html; stop after first match.
+        if user is not None:
+            break
     return results
 
 
@@ -131,18 +144,17 @@ def collect_from_graphify_out(
     *,
     user: str,
 ) -> dict[str, Path]:
-    """Copy a single-user graphify-out run into out/graph_{user}.*."""
+    """Copy a single-user graphify-out run into out/graph.html (+ .json)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = safe_slug(user)
     written: dict[str, Path] = {}
     mapping = {
-        "graph.html": out_dir / f"graph_{slug}.html",
-        "graph.json": out_dir / f"graph_{slug}.json",
-        "GRAPH_REPORT.md": out_dir / f"GRAPH_REPORT_{slug}.md",
+        "graph.html": out_dir / "graph.html",
+        "graph.json": out_dir / "graph.json",
+        "GRAPH_REPORT.md": out_dir / "GRAPH_REPORT.md",
     }
     for name, dest in mapping.items():
         src_file = src / name
         if src_file.is_file():
-            dest.write_bytes(src_file.read_bytes())
+            _atomic_write_bytes(dest, src_file.read_bytes())
             written[name] = dest
     return written

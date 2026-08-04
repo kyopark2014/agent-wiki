@@ -194,6 +194,46 @@ select {
   background: #0d1117;
 }
 
+.knowledge-graph-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 32px;
+  text-align: center;
+  color: #e6edf3;
+}
+
+.knowledge-graph-placeholder-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.knowledge-graph-placeholder-body {
+  margin: 0;
+  max-width: 28rem;
+  color: #8b949e;
+  line-height: 1.5;
+  font-size: 0.95rem;
+}
+
+.knowledge-graph-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(33, 38, 45, 0.92);
+  border: 1px solid #30363d;
+  color: #e6edf3;
+  font-size: 0.85rem;
+}
+
 .brand-logout-btn {
   flex-shrink: 0;
   width: 28px;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish per-user graphs into out/graph_{user}.html (rich UI)."""
+"""Publish per-user graphs into out/graph.html (rich UI)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from lib.config import graphify_out_dir, out_dir
-from lib.corpus import safe_slug
 from lib.out_graphs import collect_from_graphify_out, publish_user_graphs
 
 
@@ -24,14 +23,14 @@ def main() -> None:
             "Examples:\n"
             "  python publish_out.py\n"
             "  python publish_out.py --user ksdyb\n"
-            "  open out/graph_ksdyb.html\n"
+            "  open out/graph.html\n"
         ),
     )
     parser.add_argument(
         "--graph",
         type=Path,
         default=None,
-        help="Source graph.json (default: graphify-out/graph.json)",
+        help="Source graph.json (default: out/graph.json)",
     )
     parser.add_argument("--out", type=Path, default=None, help="Output dir (default: out/)")
     parser.add_argument("--user", default=None)
@@ -41,7 +40,7 @@ def main() -> None:
         "--src",
         type=Path,
         default=None,
-        help="With --collect: graphify-out directory",
+        help="With --collect: source directory (default: out/)",
     )
     args = parser.parse_args()
 
@@ -58,7 +57,7 @@ def main() -> None:
         print(f"Collected into {dest}")
         for name, path in written.items():
             print(f"  {name} → {path.name}")
-        print(f"Open: open {dest / f'graph_{safe_slug(args.user)}.html'}")
+        print(f"Open: open {dest / 'graph.html'}")
         return
 
     graph = (args.graph or (default_src / "graph.json")).expanduser().resolve()

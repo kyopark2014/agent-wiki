@@ -8,5 +8,4 @@ application/data/
 *.pyc
 graph/corpus/
 graph/out/
-graph/graphify-out/
 graph/.env
