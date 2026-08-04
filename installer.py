@@ -3492,8 +3492,8 @@ chown -R ssm-user:ssm-user /home/ssm-user/{git_name}
 
 # Build and run docker with volume mount for config.json
 cd /home/ssm-user/{git_name}
-docker build -f Dockerfile -t streamlit-app .
-docker run -d --restart=always -p 8501:8501 -v $(pwd)/application/config.json:/app/application/config.json --name app streamlit-app
+docker build -f Dockerfile -t agent-wiki-app .
+docker run -d --restart=always -p 8501:8501 -v $(pwd)/application/config.json:/app/application/config.json --name app agent-wiki-app
 
 # Make update.sh executable for manual execution via SSM
 chmod a+rx update.sh

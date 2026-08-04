@@ -360,47 +360,16 @@ Total deployment time: XX.XX minutes
 
 ### Docker Container의 생성
 
-EC2에 올라가는 application은 streamlit과 agent로 구성되고 아래와 같이 node.js, MCP, LangGraph와 같은 package들을 포함합니다. 
+EC2에 올라가는 application은 **FastAPI + React Web UI**와 같은 프로세스의 LangGraph Agent로 구성됩니다. Node.js, MCP, LangGraph 패키지를 포함하며, 실제 빌드 정의는 저장소 루트의 [`Dockerfile`](./Dockerfile)을 사용합니다.
 
-```text
-FROM --platform=linux/amd64 python:3.13-slim
-
-WORKDIR /app
-
-# Install Node.js and npm (for npx)
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install MCP packages globally
-RUN npm install -g @modelcontextprotocol/server-filesystem
-
-# Install terminal-control-mcp (Python-based terminal MCP server)
-RUN apt-get update && apt-get install -y tmux && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN pip install terminal-control-mcp
-
-# Install Python packages
-RUN pip install streamlit streamlit-chat
-RUN pip install boto3 langchain_aws langchain langchain_community langgraph langchain_experimental langgraph-supervisor langgraph-swarm langchain-text-splitters
-RUN pip install mcp langchain-mcp-adapters
-RUN pip install pandas numpy
-RUN pip install tavily-python==0.5.0 pytz>=2025.2
-RUN pip install beautifulsoup4==4.12.3 plotly_express==0.4.1 matplotlib==3.10.0 
-RUN pip install opensearch-py wikipedia aioboto3 requests
-RUN pip install uv kaleido diagrams graphviz rich colorama finance-datareader PyPDF2
-
-RUN mkdir -p /root/.streamlit
-COPY config.toml /root/.streamlit/
-
-COPY . .
-
-EXPOSE 8501
-
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
-
-ENTRYPOINT ["python", "-m", "streamlit", "run", "application/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+```bash
+docker build -f Dockerfile -t agent-wiki-app .
+docker run -d --restart=always -p 8501:8501 \
+  -v "$(pwd)/application/config.json:/app/application/config.json" \
+  --name app agent-wiki-app
 ```
+
+헬스체크: `GET /api/health` · 진입점: `uvicorn application.server:app --host 0.0.0.0 --port 8501`
 
 
 ### 주의사항

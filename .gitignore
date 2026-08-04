@@ -1,0 +1,12 @@
+.DS_Store
+**/.DS_Store
+application/web/node_modules/
+application/web/dist/
+application/.session_storage/
+application/data/
+**/__pycache__/
+*.pyc
+graph/corpus/
+graph/out/
+graph/graphify-out/
+graph/.env

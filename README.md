@@ -19,73 +19,85 @@ OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구�
 | 장기 비전 | 합성 데이터 생성 + 파인튜닝 → 모델 가중치에 코퍼스 내재화 |
 
 
+## 개요
+
+Web UI는 **FastAPI + React**이며, Agent는 **같은 프로세스**의 LangGraph로 실행합니다.
+
+| 구분 | 경로 | 역할 |
+|------|------|------|
+| Web UI | `application/server.py`, `application/web/` | Task·Chat·Skill/MCP 설정, SSE 스트리밍 |
+| Agent | `application/chat.py` → `langgraph_agent.py` | LangGraph ReAct + MCP + Skills |
+| 설정 | `application/config.json`, `mcp.list`, `skills.list` | 모델·MCP·Skill 기본값 |
+
+```text
+Browser (React :8501)
+    │  REST + SSE (/api/...)
+    ▼
+FastAPI (application/server.py)
+    │  chat.run_agent(...)
+    ▼
+LangGraph (langgraph_agent) + MCP + Skills + Bedrock
+```
+
 ## Operation Architecture
 
 ```mermaid
 flowchart TB
-  subgraph UI["Streamlit (app.py)"]
-    M["모드: 일상적인 대화 / Agent / Agent (Chat) / 이미지 분석"]
-    SKUI[Skill 선택 / MCP 선택 / Skill Mode]
+  subgraph UI["Web UI FastAPI + React"]
+    SPA["web/ React SPA"]
+    API["server.py / api/*"]
+    TS[task_store SQLite]
   end
 
-  subgraph LLM["Amazon Bedrock (chat.py)"]
-    CB[ChatBedrock]
-    BR[Bedrock Runtime]
+  subgraph Agent["application/ Agent"]
+    RA["chat.run_agent"]
+    RLA["run_langgraph_agent"]
+    SG["langgraph_agent StateGraph"]
+    CM[call_model]
+    TN[ToolNode]
   end
 
-  subgraph Skills["Agent Skills (skill.py)"]
-    SRC["skills/*/SKILL.md"]
-    BSP[build_skill_prompt]
+  subgraph Skills["Skills"]
+    SM[skill.py SkillManager]
+    SK["skills/*/SKILL.md"]
     GSI[get_skill_instructions]
   end
 
-  subgraph LangGraphStack["LangGraph Agent (langgraph_agent.py)"]
-    RLA[run_langgraph_agent]
-    SG["StateGraph: agent ↔ action"]
-    BN["Built-in: execute_code, write_file, read_file, bash, get_current_time, upload_file_to_s3"]
-    MCP[MultiServerMCPClient]
-    MEM["Agent (Chat): MemorySaver + InMemoryStore"]
+  subgraph MCP["MCP"]
+    CFG[mcp_config.py]
+    SRV["drawio / aws-drawio / korea_weather / web_fetch / ..."]
+    CLI[MultiServerMCPClient]
   end
 
-  subgraph MCPServers["MCP Servers (mcp_config.py)"]
-    AWS[aws documentation]
-    DR[drawio / aws-drawio]
-    WF[web_fetch]
-    OB[obsidian]
-    BU[browser-use]
-    KW[korea_weather]
-  end
-
-  subgraph Storage["Artifacts / S3"]
+  subgraph Storage["Artifacts / Wiki"]
     ART[artifacts/]
-    S3[(S3)]
+    CONT[contents/]
+    GOUT[graphify-out/]
   end
 
-  M -->|일상적인 대화| CB
-  M -->|Agent / Agent Chat| RLA
-  M -->|이미지 분석| CB
-  SKUI -->|default_skills| BSP
-
+  SPA --> API
+  API --> TS
+  API --> RA
+  RA --> RLA
   RLA --> SG
-  SG --> CB
-  CB --> BR
-  SG --> BN
-  SG --> MCP
+  SG --> CM
+  SG --> TN
   SG --> GSI
-  BSP -->|system_prompt| SG
-  GSI --> SRC
-  MCP --> MCPServers
-  BN --> ART
-  BN --> S3
-  RLA -->|history_mode=Enable| MEM
+  SM --> SK
+  GSI --> SK
+  TN --> CLI
+  CLI --> CFG
+  CFG --> SRV
+  TN --> ART
+  SK --> CONT
+  SK --> GOUT
 ```
 
-| 모드 | 모듈 | 설명 |
-|------|------|------|
-| 일상적인 대화 | `chat.general_conversation` | 대화 이력 + `ChatBedrock` 스트리밍 (Reasoning 옵션 지원) |
-| **Agent** | `langgraph_agent.run_langgraph_agent` | LangGraph ReAct 루프 + Built-in 도구 + MCP + Skills (`history_mode=Disable`) |
-| **Agent (Chat)** | `langgraph_agent.run_langgraph_agent` | Agent와 동일하되 `MemorySaver`로 세션 대화 이력 유지 (`history_mode=Enable`) |
-| 이미지 분석 | `chat.summarize_image` | `ChatBedrock` 멀티모달 (이미지 + 텍스트) 분석 |
+| 화면 | 설명 |
+|------|------|
+| Task Chat | 태스크별 세션 + SSE 스트리밍 (`chat.run_agent`) |
+| Skill / MCP | 사이드바에서 Skill·MCP 선택 (기본: graphify, websearch, web_fetch) |
+| 파일 업로드 | 이미지·문서 첨부 후 Agent에 전달 |
 
 
 ## ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
@@ -317,16 +329,30 @@ Human(Q2) → AI(A2) → Human(Q3) → AI(tool_calls) → ToolMessage → AI(A3)
 git clone https://github.com/kyopark2014/agent-wiki
 ```
 
-필요한 패키지를 설치합니다.
+필요한 패키지를 설치한 뒤, 프론트를 빌드하고 FastAPI를 실행합니다.
 
 ```bash
 cd agent-wiki && pip install -r requirements.txt
+
+# 프론트 빌드 후 FastAPI (포트 8501)
+./run_local.sh
+
+# 또는
+cd application/web && npm install && npm run build && cd ../..
+uvicorn application.server:app --host 0.0.0.0 --port 8501
 ```
 
-Streamlit app을 실행합니다.
+브라우저: [http://localhost:8501](http://localhost:8501)
+
+- 최초 접속 시 User ID를 입력하면 쿠키로 세션이 유지됩니다.
+- Agent는 AgentCore Runtime이 아니라 **로컬 LangGraph**로 동작합니다.
+
+프론트만 수정할 때:
 
 ```bash
-streamlit run application/app.py 
+cd application/web && npm run dev   # Vite :5173, /api → :8501 프록시
+# 다른 터미널
+uvicorn application.server:app --host 0.0.0.0 --port 8501
 ```
 
 

@@ -92,6 +92,22 @@ Shows a detailed explanation and connections for a specific node (concept).
 /graphify explain "RAG"
 ```
 
+## How to Run
+
+```bash
+git clone https://github.com/kyopark2014/agent-wiki
+cd agent-wiki && pip install -r requirements.txt
+
+# Build frontend and start FastAPI on :8501
+./run_local.sh
+
+# Or
+cd application/web && npm install && npm run build && cd ../..
+uvicorn application.server:app --host 0.0.0.0 --port 8501
+```
+
+Open [http://localhost:8501](http://localhost:8501). Enter a User ID on first visit (cookie session). The agent runs as local LangGraph in the same process.
+
 ## Execution Results
 
 Running `/graphify contents/` generates a graph from the files in the contents folder, as shown below.

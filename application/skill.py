@@ -18,10 +18,38 @@ logger = logging.getLogger("skill")
 
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILLS_DIR = os.path.join(WORKING_DIR, "skills")
-ARTIFACTS_DIR = os.path.join(WORKING_DIR, "artifacts")
+# Per-user artifacts / skills under SESSION_STORAGE_DIR (via set_user_workspace).
+ARTIFACTS_DIR = utils.get_user_artifacts_dir("default")
+USER_SKILLS_DIR = utils.get_user_skills_dir("default")
 
 config = utils.load_config()
 sharing_url = config.get("sharing_url")
+
+
+def set_user_artifacts(user_id: str | None) -> str:
+    """Point ARTIFACTS_DIR at {SESSION_STORAGE_DIR}/{user_id}/artifacts for skill prompts."""
+    global ARTIFACTS_DIR
+    artifacts_dir = utils.ensure_user_artifacts_dir(user_id)
+    ARTIFACTS_DIR = artifacts_dir
+    logger.info(f"skill ARTIFACTS_DIR set for user {user_id!r}: {artifacts_dir}")
+    return artifacts_dir
+
+
+def set_user_skills(user_id: str | None) -> str:
+    """Point USER_SKILLS_DIR and ensure per-user skills.list exists."""
+    global USER_SKILLS_DIR
+    skills_dir = utils.ensure_user_skills_dir(user_id)
+    USER_SKILLS_DIR = skills_dir
+    utils.ensure_user_skills_list(user_id)
+    logger.info(f"skill USER_SKILLS_DIR set for user {user_id!r}: {skills_dir}")
+    return skills_dir
+
+
+def set_user_workspace(user_id: str | None) -> tuple[str, str]:
+    """Configure per-user artifacts + skills dirs; create skills.list if missing."""
+    artifacts_dir = set_user_artifacts(user_id)
+    skills_dir = set_user_skills(user_id)
+    return artifacts_dir, skills_dir
 
 # ═══════════════════════════════════════════════════════════════════
 #  Skill Manager – implementation of Anthropic Agent Skills spec
@@ -136,6 +164,42 @@ def register_plugin_skills(plugin_name: str):
     skill_manager.discover_plugin_skills(skills_dir)
 
 
+def get_skill_info(skill_list: list) -> list:
+    skill_manager = skill_managers.get('base')
+    if skill_manager is None:
+        skill_manager = SkillManager(SKILLS_DIR)
+        skill_managers['base'] = skill_manager
+        skill_manager.discover_plugin_skills(SKILLS_DIR)
+
+    # Merge per-user skill-creator skills from .session_storage/{user}/skills.
+    if USER_SKILLS_DIR and os.path.isdir(USER_SKILLS_DIR):
+        skill_manager.discover_plugin_skills(USER_SKILLS_DIR)
+
+    registry = skill_manager.registry
+    
+    if not registry:
+        return []
+    
+    skill_info = []
+    for s in registry.values():
+        if s.name in skill_list:
+            skill_info.append({"name": s.name, "description": s.description})
+        
+    return skill_info
+
+
+def get_plugin_skill_info(plugin_name: str) -> list:
+    skill_manager = skill_managers.get(plugin_name)
+    if skill_manager is None:
+        skills_dir = os.path.join(WORKING_DIR, "plugins", plugin_name, "skills")
+        skill_manager = SkillManager(skills_dir)
+        skill_managers[plugin_name] = skill_manager
+        skill_manager.discover_plugin_skills(skills_dir)
+
+    registry = skill_manager.registry
+    return registry.values()
+
+
 def available_skill_info(plugin_name: str) -> list:
     skill_manager = skill_managers.get(plugin_name)
     if skill_manager is None:
@@ -166,20 +230,21 @@ def selected_skill_info(plugin_name: str) -> list:
         skill_list = config.get("plugin_skills", {}).get(plugin_name) or []
     logger.info(f"plugin_name: {plugin_name}, skill_list: {skill_list}")
 
-    plugin_skill_info = available_skill_info(plugin_name)
+    skill_info = available_skill_info(plugin_name)
 
-    skill_info = []
-    for s in plugin_skill_info:
+    selected_skill_info = []
+    for s in skill_info:
         if s["name"] in skill_list:
-            skill_info.append(s)
-    return skill_info
+            selected_skill_info.append(s)
+    return selected_skill_info
 
 
 SKILL_SYSTEM_PROMPT = (
     "당신의 이름은 서연이고, 질문에 친근한 방식으로 대답하도록 설계된 대화형 AI입니다.\n"
     "상황에 맞는 구체적인 세부 정보를 충분히 제공합니다.\n"
     "모르는 질문을 받으면 솔직히 모른다고 말합니다.\n"
-    "한국어로 답변하세요.\n\n"
+    "한국어로 답변하세요.\n"
+    "Memory를 답변에 적극 활용하세요.\n\n"
     "## Agent Workflow\n"
     "1. 사용자 입력을 받는다\n"
     "2. 요청에 맞는 skill이 있으면 get_skill_instructions 도구로 상세 지침을 로드한다\n"
@@ -191,12 +256,17 @@ SKILL_SYSTEM_PROMPT = (
 SKILL_USAGE_GUIDE = (
     "\n## Skill 사용 가이드\n"
     "위의 <available_skills>에 나열된 skill이 사용자의 요청과 관련될 때:\n"
-    "1. 먼저 get_skill_instructions 도구로 해당 skill의 상세 지침을 로드하세요.\n"
+    "1. 먼저 get_skill_instructions(plugin_name=\"base\", "
+    "skill_name=\"<available_skills의 name>\")로 상세 지침을 로드하세요.\n"
+    "   - plugin_name은 항상 \"base\" (MCP 서버 이름·구 skill 이름 금지).\n"
+    "   - skill_name은 <name>과 정확히 일치해야 합니다 "
+    "(예: architecture-drawer).\n"
     "2. **중요: 지침을 읽기 전에 어떤 작업을 할지 단정짓지 마세요.** "
     "skill의 description에 서브커맨드(query, path, explain 등)가 있다면, "
     "사용자 명령의 서브커맨드를 정확히 파악한 후 그에 맞는 동작을 설명하세요.\n"
     "3. 지침에 포함된 코드 패턴을 execute_code 도구로 실행하세요.\n"
-    "4. skill 지침이 없는 일반 질문은 직접 답변하세요.\n"
+    "4. skill 지침이 없는 질문이라도 Memory(recall_memory)로 사용자 맥락을 "
+    "먼저 조회한 뒤 답변하세요. 개인 정보·선호·위치가 필요하면 추측하지 마세요.\n"
 )
 
 def build_skill_prompt(skill_info: list) -> str:
@@ -206,7 +276,10 @@ def build_skill_prompt(skill_info: list) -> str:
         f"## Paths (use absolute paths for write_file, read_file)\n"
         f"- WORKING_DIR: {WORKING_DIR}\n"
         f"- ARTIFACTS_DIR: {ARTIFACTS_DIR}\n"
-        f"Example: write_file(filepath='{os.path.join(ARTIFACTS_DIR, 'report.drawio')}', content='...')\n\n"
+        f"- USER_SKILLS_DIR: {USER_SKILLS_DIR}\n"
+        f"Example: write_file(filepath='{os.path.join(ARTIFACTS_DIR, 'report.drawio')}', content='...')\n"
+        f"New skills: write under USER_SKILLS_DIR/<skill-name>/SKILL.md "
+        f"(not under WORKING_DIR/skills/).\n\n"
     )
 
     skills_xml = get_skills_xml(skill_info)
@@ -268,7 +341,9 @@ def build_command_prompt(plugin_name: str, command: str) -> str:
         f"## Paths (use absolute paths for write_file, read_file)\n"
         f"- WORKING_DIR: {WORKING_DIR}\n"
         f"- ARTIFACTS_DIR: {ARTIFACTS_DIR}\n"
-        f"Example: write_file(filepath='{os.path.join(ARTIFACTS_DIR, 'report.drawio')}', content='...')\n\n"
+        f"- USER_SKILLS_DIR: {USER_SKILLS_DIR}\n"
+        f"Example: write_file(filepath='{os.path.join(ARTIFACTS_DIR, 'report.drawio')}', content='...')\n"
+        f"New skills: write under USER_SKILLS_DIR/<skill-name>/SKILL.md.\n\n"
     )
 
     command_instructions = get_command_instructions(plugin_name, command)
@@ -278,6 +353,28 @@ def build_command_prompt(plugin_name: str, command: str) -> str:
     skills_section = f"{skills_xml}\n" if skills_xml else ""
 
     return f"{SKILL_SYSTEM_PROMPT}\n{path_info}\n{command_section}\n{skills_section}\n{COMMAND_USAGE_GUIDE}"
+
+
+# Renamed / legacy skill names → current registry name.
+SKILL_ALIASES = {}
+
+
+def _resolve_skill_name(skill_name: str) -> str:
+    key = (skill_name or "").strip()
+    return SKILL_ALIASES.get(key, key)
+
+
+def _get_or_create_skill_manager(plugin_name: str) -> SkillManager:
+    skill_manager = skill_managers.get(plugin_name)
+    if skill_manager is not None:
+        return skill_manager
+    if plugin_name == "base":
+        skills_dir = SKILLS_DIR
+    else:
+        skills_dir = os.path.join(WORKING_DIR, "plugins", plugin_name, "skills")
+    skill_manager = SkillManager(skills_dir)
+    skill_managers[plugin_name] = skill_manager
+    return skill_manager
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -292,37 +389,54 @@ def get_skill_instructions(plugin_name: str, skill_name: str) -> str:
     one of the available skills listed in the system prompt.
 
     Args:
-        skill_name: The name of the skill to load (e.g. 'pdf').
+        plugin_name: Use "base" for application skills in <available_skills>.
+        skill_name: Exact <name> from <available_skills>
+            (e.g. 'architecture-drawer', 'pdf').
 
     Returns:
         The full skill instructions, or an error message if not found.
-    """    
+    """
+    requested = skill_name
+    skill_name = _resolve_skill_name(skill_name)
+    if skill_name != requested:
+        logger.info(
+            "skill alias resolved: %s -> %s", requested, skill_name
+        )
+    # MCP / legacy names are sometimes passed as plugin_name; treat as base.
+    if plugin_name != "base" and not os.path.isdir(
+        os.path.join(WORKING_DIR, "plugins", plugin_name, "skills")
+    ):
+        logger.info(
+            "unknown plugin %r; falling back to base for skill %r",
+            plugin_name,
+            skill_name,
+        )
+        plugin_name = "base"
+
     logger.info(f"###### get_skill_instructions: {skill_name} ######")
-    skill_manager = skill_managers.get(plugin_name)
-    if skill_manager is None:
-        if plugin_name == "base": # base skills
-            skills_dir = SKILLS_DIR
-        else:   # plugin skills
-            skills_dir = os.path.join(WORKING_DIR, "plugins", plugin_name, "skills")
-        skill_manager = SkillManager(skills_dir)
-        skill_managers[plugin_name] = skill_manager
+    skill_manager = _get_or_create_skill_manager(plugin_name)
 
     instructions = skill_manager.get_skill_instructions(skill_name)
     if instructions:
         return instructions
 
+    # Also search per-user skills when base manager misses the name.
+    if plugin_name == "base" and USER_SKILLS_DIR and os.path.isdir(USER_SKILLS_DIR):
+        skill_manager.discover_plugin_skills(USER_SKILLS_DIR)
+        instructions = skill_manager.get_skill_instructions(skill_name)
+        if instructions:
+            return instructions
+
     # fallback to base skills
-    skill_manager = skill_managers.get("base")
-    if skill_manager is None:
-        skills_dir = SKILLS_DIR
-        skill_manager = SkillManager(skills_dir)
-        skill_managers["base"] = skill_manager
+    skill_manager = _get_or_create_skill_manager("base")
+    if USER_SKILLS_DIR and os.path.isdir(USER_SKILLS_DIR):
+        skill_manager.discover_plugin_skills(USER_SKILLS_DIR)
     instructions = skill_manager.get_skill_instructions(skill_name)
     if instructions:
         return instructions
 
     available = ", ".join(skill_manager.registry.keys())
-    return f"Skill '{skill_name}' not found. Available skills: {available}"
+    return f"Skill '{requested}' not found. Available skills: {available}"
 
 
 def get_skill_tools():

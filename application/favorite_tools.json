@@ -1,7 +1,7 @@
 {
   "MCP": [
-    "web_fetch",
-    "websearch"
+    "websearch",
+    "web_fetch"
   ],
   "SKILL": [
     "graphify"

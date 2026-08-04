@@ -3,6 +3,7 @@ import sys
 import utils
 import os
 import json
+import shutil
 import boto3
 
 logging.basicConfig(
@@ -23,9 +24,7 @@ logger.info(f"config: {config}")
 region = config["region"] if "region" in config else "us-west-2"
 projectName = config["projectName"] if "projectName" in config else "mcp"
 workingDir = os.path.dirname(os.path.abspath(__file__))
-
-parent_dir = os.path.dirname(workingDir)
-contents_dir = os.path.join(parent_dir, "contents")
+contents_dir = os.path.join(workingDir, "contents")
 logger.info(f"workingDir: {workingDir}")
 logger.info(f"contents_dir: {contents_dir}")
 
@@ -79,48 +78,159 @@ def get_agentcore_gateway_mcp_url(gateway_name: str, gateway_region: str) -> str
         logger.error(f"Error resolving AgentCore gateway URL for {gateway_name}: {e}")
 
     return None
-
-def load_config(mcp_type):
-    if mcp_type == "aws documentation":
-        mcp_type = "aws_documentation"    
     
-    if mcp_type == "aws_documentation":
+def load_config(mcp_type):
+    # Display-name aliases (aligned with agentic-work mcp.list)
+    if mcp_type == "knowledge base":
+        mcp_type = "kb-retriever"
+    elif mcp_type == "aws documentation":
+        mcp_type = "aws_documentation"
+    elif mcp_type == "trade info":
+        mcp_type = "trade_info"
+    elif mcp_type == "image generation":
+        mcp_type = "image_generation"
+    elif mcp_type == "AWS Sentral (Employee)":
+        mcp_type = "aws_sentral"
+    elif mcp_type == "AWS Outlook (Employee)":
+        mcp_type = "aws_outlook"
+    elif mcp_type == "AWS Slack (Employee)":
+        mcp_type = "aws_slack"
+    elif mcp_type == "AWS Loop (Employee)":
+        mcp_type = "aws_loop"
+
+    if mcp_type == "tavily":
         return {
             "mcpServers": {
-                "awslabs.aws-documentation-mcp-server": {
-                    "command": "uvx",
-                    "args": ["awslabs.aws-documentation-mcp-server@latest"],
-                    "env": {
-                        "FASTMCP_LOG_LEVEL": "ERROR"
-                    }
+                "tavily-search": {
+                    "command": "python",
+                    "args": [
+                        f"{workingDir}/mcp_server_tavily.py"
+                    ]
                 }
             }
         }
         
-    elif mcp_type == "drawio":
+    elif mcp_type == "use-aws": 
         return {
             "mcpServers": {
-                "drawio": {
-                "command": "npx",
-                "args": ["@drawio/mcp"]
+                "use-aws": {
+                    "command": "python",
+                    "args": [
+                        f"{workingDir}/mcp_server_use_aws.py"
+                    ]
                 }
             }
         }
 
-    elif mcp_type == "aws-drawio":
+    elif mcp_type == "image_generation":
         return {
             "mcpServers": {
-                "drawio": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "https://github.com/aws-samples/sample-drawio-mcp/releases/latest/download/drawio-mcp-server-latest.tgz",
-                    "--no-cache"
-                ],
-                "type": "stdio"
+                "imageGeneration": {
+                    "command": "python",
+                    "args": [
+                        f"{workingDir}/mcp_server_image_generation.py"
+                    ],
+                    "env": {
+                        "PYTHONPATH": workingDir,
+                        # AGENTCORE_USER_ID is injected at runtime in chat.create_agent()
+                    },
                 }
             }
-        }        
+        }
+    
+    elif mcp_type == "kb-retriever":
+        return {
+            "mcpServers": {
+                "kb_retriever": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_retrieve.py"],
+                    "env": {
+                        "PYTHONPATH": workingDir,
+                        # AGENTCORE_USER_ID is injected at runtime in chat.create_agent()
+                    },
+                }
+            }
+        }
+
+    elif mcp_type == "terminal (MAC)":
+        return {
+            "mcpServers": {
+                "iterm-mcp": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "iterm-mcp"
+                    ]
+                }
+            }
+        }
+    
+    elif mcp_type == "terminal (linux)":
+        return {
+            "mcpServers": {
+                "terminal-control": {
+                    "command": "terminal-control-mcp",
+                    "args": [],
+                    "env": {
+                        "TERMINAL_CONTROL_SECURITY_LEVEL": "low"  # "off", "low", "medium", "high" 중 선택
+                    }
+                }
+            }
+        }    
+    
+    elif mcp_type == "filesystem":
+        parent_dir = os.path.dirname(workingDir)
+        contents_dir = os.path.join(parent_dir, "contents")
+        return {
+            "mcpServers": {
+                "filesystem": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "@modelcontextprotocol/server-filesystem",
+                        f"{parent_dir}",
+                        f"{workingDir}",
+                        f"{contents_dir}"
+                    ]
+                }
+            }
+        }    
+    
+    elif mcp_type == "aws_documentation":
+        # Prefer preinstalled binary (pip / uv tool install) over uvx so
+        # each agent init does not re-resolve and install 40+ packages.
+        env = {"FASTMCP_LOG_LEVEL": "ERROR"}
+        command = shutil.which("awslabs.aws-documentation-mcp-server")
+        args: list[str] = []
+        if not command:
+            logger.warning(
+                "awslabs.aws-documentation-mcp-server is not preinstalled; "
+                "falling back to uvx (install once with: "
+                "uv tool install awslabs.aws-documentation-mcp-server)"
+            )
+            command = "uvx"
+            args = ["awslabs.aws-documentation-mcp-server"]
+        return {
+            "mcpServers": {
+                "awslabs.aws-documentation-mcp-server": {
+                    "command": command,
+                    "args": args,
+                    "env": env,
+                }
+            }
+        }
+
+    elif mcp_type == "trade_info":
+        return {
+            "mcpServers": {
+                "trade_info": {
+                    "command": "python",
+                    "args": [
+                        f"{workingDir}/mcp_server_trade_info.py"
+                    ]
+                }
+            }
+        }
 
     elif mcp_type == "web_fetch":
         return {
@@ -132,11 +242,101 @@ def load_config(mcp_type):
             }
         }
     
+    elif mcp_type == "text_extraction":
+        return {
+            "mcpServers": {
+                "text_extraction": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_text_extraction.py"]
+                }
+            }
+        }
+
+    elif mcp_type == "memory":
+        return {
+            "mcpServers": {
+                "memory": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_memory.py"],
+                    "env": {
+                        "PYTHONPATH": workingDir,
+                        # AGENTCORE_USER_ID is injected at runtime in langgraph_agent.create_agent()
+                    },
+                }
+            }
+        }
+    
+    elif mcp_type == "outlook":
+        secret_name = f"outlook-mcp-user-email"
+        secret_value = json.loads(get_secret_value(secret_name))
+        OUTLOOK_MCP_USER_EMAIL = secret_value['value']
+        if not OUTLOOK_MCP_USER_EMAIL:
+            logger.info(f"No outlook user email found in secret manager")
+            return {}
+        else:
+            logger.info(f"outlook user email: {OUTLOOK_MCP_USER_EMAIL}")
+            return {
+                "mcpServers": {
+                    "outlook": {
+                        "command": f"{workingDir}/outlook-mac/outlook_mcp.py",
+                        "env":{
+                            "USER_EMAIL":OUTLOOK_MCP_USER_EMAIL,
+                            "OUTLOOK_MCP_LOG_LEVEL":"INFO"
+                        }
+                    }
+                }
+            }
+    
+    elif mcp_type == "slack":
+        slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        slack_team = os.environ.get("SLACK_TEAM_ID", "")
+        if not slack_token:
+            logger.info(
+                "Slack MCP skipped: SLACK_BOT_TOKEN not set. "
+                "Configure AWS Secrets Manager secret slackapikey "
+                "or set SLACK_BOT_TOKEN in the environment."
+            )
+            return {}
+        return {
+            "mcpServers": {
+                "slack": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "@modelcontextprotocol/server-slack"
+                    ],
+                    "env": {
+                        "SLACK_BOT_TOKEN": slack_token,
+                        "SLACK_TEAM_ID": slack_team
+                    }
+                }
+            }
+        }
+    
+    elif mcp_type == "notion":
+        return {
+            "mcpServers": {
+                "notionApi": {
+                    "command": "npx",
+                    "args": ["-y", "@notionhq/notion-mcp-server"],
+                    "env": {
+                        "NOTION_TOKEN": utils.notion_api_key
+                    }
+                }
+            }
+        }    
+
+    elif mcp_type == "gog":
+        return {
+            "mcpServers": {
+                "gog": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_gog.py"]
+                }
+            }
+        }
+    
     elif mcp_type == "obsidian":
-        # create folder if not exists
-        if not os.path.exists(os.path.expanduser("~/Documents/memo")):
-            os.makedirs(os.path.expanduser("~/Documents/memo"))
-            
         return {
             "mcpServers": {
                 "obsidian": {
@@ -145,7 +345,27 @@ def load_config(mcp_type):
                 }
             }
         }
+    
+    elif mcp_type == "aws_sentral":
+        return {
+            "mcpServers": {
+                "aws_sentral": {
+                "command": os.path.expanduser("~/.toolbox/bin/aws-sentral-mcp"),
+                "args": []
+                }
+            }
+        }
 
+    elif mcp_type == "aws_outlook":
+        return {
+            "mcpServers": {
+                "aws_outlook": {
+                    "command": os.path.expanduser("~/.toolbox/bin/aws-outlook-mcp"),
+                    "args": []
+                }
+            }
+        }   
+        
     elif mcp_type == "browser-use":
         return {
             "mcpServers": {
@@ -155,13 +375,58 @@ def load_config(mcp_type):
                 }
             }
         }
-    
+
+    elif mcp_type == "drawio":
+        return {
+            "mcpServers": {
+                "drawio": {
+                    "command": "npx",
+                    "args": ["@drawio/mcp"],
+                }
+            }
+        }
+
+    elif mcp_type == "aws-drawio":
+        return {
+            "mcpServers": {
+                "drawio": {
+                    "command": "npx",
+                    "args": [
+                        "-y",
+                        "https://github.com/aws-samples/sample-drawio-mcp/releases/latest/download/drawio-mcp-server-latest.tgz",
+                        "--no-cache",
+                    ],
+                    "type": "stdio",
+                }
+            }
+        }
+
     elif mcp_type == "korea_weather":
         return {
             "mcpServers": {
                 "korea-weather": {
                     "command": "python",
-                    "args": [f"{workingDir}/mcp_server_korea_weather.py"]
+                    "args": [f"{workingDir}/mcp_server_korea_weather.py"],
+                }
+            }
+        }
+    
+    elif mcp_type == "aws_slack":
+        return {
+            "mcpServers" : {
+                "slack-mcp" : {
+                "command" : "slack-mcp",
+                "args" : [ ]
+                }
+            }
+        }
+    
+    elif mcp_type == "aws_loop":
+        return {
+            "mcpServers" : {
+                "loop-mcp" : {
+                    "command" : "loop-mcp",
+                    "args" : [ ]
                 }
             }
         }
@@ -185,7 +450,7 @@ def load_config(mcp_type):
                 }
             }
         }
-    
+
     elif mcp_type == "사용자 설정":
         return mcp_user_config
 

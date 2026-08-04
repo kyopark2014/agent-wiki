@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Extract knowledge graph from corpus/ via LiteLLM — no /graphify skill.
+
+Uses OpenAI-compatible LiteLLM gateway for semantic extraction, then
+graphifyy (build/cluster/export) for graph.json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from lib.build_graph import build_and_export
+from lib.config import corpus_dir, graphify_out_dir
+from lib.semantic import extract_corpus
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python extract_graph.py\n"
+            "  python extract_graph.py --corpus corpus --deep\n"
+            "  python extract_graph.py --limit 5   # smoke test\n"
+        ),
+    )
+    parser.add_argument("--corpus", type=Path, default=None, help="Corpus directory")
+    parser.add_argument(
+        "--work",
+        type=Path,
+        default=None,
+        help="Work root (graphify-out written here; default: this folder)",
+    )
+    parser.add_argument("--model", default=None, help="Override GRAPHIFY_LLM_MODEL")
+    parser.add_argument("--chunk-size", type=int, default=8, help="Files per LLM call")
+    parser.add_argument("--limit", type=int, default=None, help="Max corpus files")
+    parser.add_argument("--deep", action="store_true", help="Aggressive INFERRED edges")
+    args = parser.parse_args()
+
+    corpus = (args.corpus or corpus_dir()).expanduser().resolve()
+    work = (args.work or HERE).expanduser().resolve()
+    # Ensure graphify-out lives under work even if CORPUS is elsewhere
+    _ = graphify_out_dir()  # load env for consistency
+
+    extraction = extract_corpus(
+        corpus,
+        work,
+        deep=args.deep,
+        chunk_size=args.chunk_size,
+        limit=args.limit,
+        model=args.model,
+    )
+    graph_json = build_and_export(extraction, work, corpus_label=str(corpus))
+    print()
+    print("Next:")
+    print("  python publish_out.py")
+    print(f"  # or: python publish_out.py --graph {graph_json}")
+
+
+if __name__ == "__main__":
+    main()
