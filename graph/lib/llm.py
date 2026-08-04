@@ -1,8 +1,8 @@
-"""LiteLLM gateway chat client (OpenAI-compatible /v1 for any provider model).
+"""LLM chat client: LiteLLM gateway first, Bedrock Converse fallback.
 
-The gateway accepts Claude, OpenAI, Gemini, etc. as ``model`` ids. Request
-kwargs are adapted per model family so Claude is not forced through GPT-only
-options (e.g. json_object mode, temperature on models that reject it).
+Gateway path uses OpenAI-compatible /v1 (any LiteLLM model id). When
+``application/config.json`` has no llm_gateway_*, falls back to AWS Bedrock
+``converse`` like ``runtime_agent/langgraph`` (boto3 credential chain).
 """
 
 from __future__ import annotations
@@ -13,7 +13,11 @@ from typing import Any
 
 from openai import OpenAI
 
-from lib.config import llm_gateway_settings
+from lib.config import (
+    bedrock_settings,
+    graphify_llm_model,
+    llm_gateway_settings,
+)
 
 # Friendly / UI names → LiteLLM gateway model ids (same as application map).
 # Unknown ids are passed through unchanged so any LiteLLM model works.
@@ -37,6 +41,15 @@ _MODEL_ALIASES: dict[str, str] = {
     "OpenAI GPT 5.6 Luna": "gpt-5.6-luna",
 }
 
+# Gateway / short ids → Bedrock inference profile ids (langgraph info.py).
+_BEDROCK_MODEL_IDS: dict[str, str] = {
+    "claude-haiku-4-5": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "claude-sonnet-4-5": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "claude-opus-4-5": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1",
+    "claude-sonnet-4-6": "us.anthropic.claude-sonnet-4-6",
+}
+
 
 def resolve_model_id(model: str) -> str:
     """Map UI / shorthand names to gateway ids; pass LiteLLM ids through."""
@@ -50,6 +63,37 @@ def resolve_model_id(model: str) -> str:
         if key.lower() == lower:
             return value
     return raw
+
+
+def resolve_bedrock_model_id(model: str) -> str:
+    """Map gateway alias / UI name to a Bedrock model id."""
+    raw = (model or "").strip()
+    if not raw:
+        return _BEDROCK_MODEL_IDS["claude-haiku-4-5"]
+    # Already a Bedrock / inference-profile id.
+    if (
+        raw.startswith("us.")
+        or raw.startswith("eu.")
+        or raw.startswith("apac.")
+        or ".anthropic." in raw
+        or raw.startswith("anthropic.")
+        or raw.startswith("amazon.")
+        or raw.startswith("openai.")
+    ):
+        return raw
+    gateway_id = resolve_model_id(raw)
+    if gateway_id in _BEDROCK_MODEL_IDS:
+        return _BEDROCK_MODEL_IDS[gateway_id]
+    lower = gateway_id.lower()
+    for key, value in _BEDROCK_MODEL_IDS.items():
+        if key.lower() == lower:
+            return value
+    raise SystemExit(
+        f"No Bedrock model mapping for '{raw}'.\n"
+        "Set GRAPHIFY_BEDROCK_MODEL to a full Bedrock id "
+        "(e.g. us.anthropic.claude-haiku-4-5-20251001-v1:0), "
+        "or configure llm_gateway_url / llm_gateway_key in application/config.json."
+    )
 
 
 def _model_family(model: str) -> str:
@@ -72,9 +116,24 @@ def _model_family(model: str) -> str:
     return "other"
 
 
+def default_model() -> str:
+    """Resolved GRAPHIFY_LLM_MODEL (gateway id); works without gateway."""
+    return resolve_model_id(graphify_llm_model())
+
+
 def make_client() -> tuple[OpenAI, str]:
-    """Return OpenAI-compatible client pointed at LiteLLM + resolved default model."""
+    """Return OpenAI-compatible client pointed at LiteLLM + resolved default model.
+
+    Raises SystemExit if gateway is not configured (use ``chat_json`` for
+    automatic Bedrock fallback).
+    """
     gw = llm_gateway_settings()
+    if gw is None:
+        raise SystemExit(
+            "LiteLLM gateway is not configured.\n"
+            "Set llm_gateway_url / llm_gateway_key in application/config.json,\n"
+            "or use chat_json() which falls back to Bedrock Converse."
+        )
     client = OpenAI(api_key=gw["key"], base_url=gw["base_url"])
     return client, resolve_model_id(gw["model"])
 
@@ -117,19 +176,81 @@ def _completion_kwargs(
     return kwargs
 
 
-def chat_json(
+def _split_system_messages(
+    messages: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+    """Split OpenAI-style messages into Bedrock system + converse messages."""
+    system: list[dict[str, str]] = []
+    converse_messages: list[dict[str, Any]] = []
+    for msg in messages:
+        role = (msg.get("role") or "user").strip()
+        content = msg.get("content") or ""
+        if role == "system":
+            system.append({"text": content})
+            continue
+        if role not in ("user", "assistant"):
+            role = "user"
+        converse_messages.append(
+            {"role": role, "content": [{"text": content}]}
+        )
+    if not converse_messages:
+        converse_messages = [{"role": "user", "content": [{"text": ""}]}]
+    return system, converse_messages
+
+
+def _chat_json_bedrock(
     messages: list[dict[str, str]],
     *,
     model: str | None = None,
-    temperature: float | None = None,
 ) -> dict[str, Any]:
-    """Call LiteLLM /v1/chat/completions and parse a JSON object response.
+    """Call Bedrock Converse and parse a JSON object response."""
+    import boto3
+    from botocore.config import Config
 
-    ``model`` may be any LiteLLM gateway id (claude-*, gpt-*, gemini-*, …)
-    or a known UI alias. Request options adapt to the provider family.
-    """
-    client, default_model = make_client()
-    model = resolve_model_id(model or default_model)
+    settings = bedrock_settings()
+    model_id = resolve_bedrock_model_id(model or settings["model"])
+    region = settings["region"]
+
+    system, converse_messages = _split_system_messages(messages)
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=region,
+        config=Config(retries={"max_attempts": 10}, read_timeout=300),
+    )
+
+    kwargs: dict[str, Any] = {
+        "modelId": model_id,
+        "messages": converse_messages,
+    }
+    if system:
+        kwargs["system"] = system
+
+    resp = client.converse(**kwargs)
+    blocks = ((resp.get("output") or {}).get("message") or {}).get("content") or []
+    parts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("text")]
+    content = "\n".join(parts).strip()
+    data = json.loads(_strip_fences(content))
+    if not isinstance(data, dict):
+        raise ValueError("LLM returned non-object JSON")
+
+    usage = resp.get("usage") or {}
+    data.setdefault("input_tokens", int(usage.get("inputTokens") or 0))
+    data.setdefault("output_tokens", int(usage.get("outputTokens") or 0))
+    data.setdefault("_llm_backend", "bedrock")
+    data.setdefault("_llm_model", model_id)
+    data.setdefault("_llm_region", region)
+    return data
+
+
+def _chat_json_gateway(
+    messages: list[dict[str, str]],
+    *,
+    model: str | None,
+    temperature: float | None,
+    gw: dict[str, str],
+) -> dict[str, Any]:
+    client = OpenAI(api_key=gw["key"], base_url=gw["base_url"])
+    model = resolve_model_id(model or gw["model"])
 
     # Try progressively more compatible request shapes.
     attempts: list[dict[str, Any]] = [
@@ -170,4 +291,26 @@ def chat_json(
     if usage is not None:
         data.setdefault("input_tokens", getattr(usage, "prompt_tokens", 0) or 0)
         data.setdefault("output_tokens", getattr(usage, "completion_tokens", 0) or 0)
+    data.setdefault("_llm_backend", "gateway")
+    data.setdefault("_llm_model", model)
+    data.setdefault("_llm_source", gw.get("source", "gateway"))
     return data
+
+
+def chat_json(
+    messages: list[dict[str, str]],
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+) -> dict[str, Any]:
+    """Call LiteLLM gateway, or Bedrock Converse if gateway is unset.
+
+    ``model`` may be a LiteLLM gateway id (claude-*, gpt-*, …), a UI alias,
+    or a Bedrock model id when using the Bedrock fallback.
+    """
+    gw = llm_gateway_settings()
+    if gw is not None:
+        return _chat_json_gateway(
+            messages, model=model, temperature=temperature, gw=gw
+        )
+    return _chat_json_bedrock(messages, model=model)

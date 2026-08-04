@@ -25,6 +25,16 @@ def _run(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
     subprocess.check_call(cmd, cwd=str(HERE), env=env)
 
 
+def _corpus_md_count(corpus: Path) -> int:
+    if not corpus.is_dir():
+        return 0
+    return sum(
+        1
+        for p in corpus.rglob("*.md")
+        if p.is_file() and p.name != ".gitkeep"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -83,6 +93,18 @@ def main() -> None:
         if args.per_user:
             cmd.append("--per-user")
         _run(cmd, env=env)
+
+    from lib.config import corpus_dir
+
+    corpus_path = Path(env.get("CORPUS_DIR", str(corpus_dir()))).expanduser().resolve()
+    if _corpus_md_count(corpus_path) == 0:
+        print(
+            f"No corpus markdown under {corpus_path}; "
+            "skip extract/publish (no chat turns for this user yet)."
+        )
+        print()
+        print(f"Done (empty corpus). Graph will appear after chat turns exist.")
+        return
 
     if not args.skip_extract:
         cmd = [py, "run_extract.py", "--chunk-size", str(args.chunk_size)]

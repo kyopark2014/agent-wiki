@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lib.llm import chat_json, make_client
+from lib.config import bedrock_settings, llm_gateway_settings
+from lib.llm import chat_json, default_model, resolve_bedrock_model_id
 
 EXTRACT_SYSTEM = """You are a graphify extraction agent. Read the documents and extract a knowledge graph fragment.
 Output ONLY valid JSON matching the schema - no explanation, no markdown fences, no preamble.
@@ -192,9 +193,16 @@ def extract_corpus(
             f"extract {len(uncached)}"
         )
 
-        _, default_model = make_client()
-        model = model or default_model
-        print(f"LLM: {model}")
+        model = model or default_model()
+        gw = llm_gateway_settings()
+        if gw:
+            print(f"LLM: {model} (gateway: {gw.get('source')})")
+        else:
+            bs = bedrock_settings()
+            print(
+                f"LLM: {resolve_bedrock_model_id(model)} "
+                f"(bedrock:{bs['region']})"
+            )
 
         new_parts: list[dict[str, Any]] = []
         uncached_paths = [Path(p) for p in uncached]

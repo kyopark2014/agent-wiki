@@ -112,8 +112,8 @@ def load_app_config() -> dict[str, Any]:
         return json.load(f)
 
 
-def llm_gateway_settings() -> dict[str, str]:
-    """LiteLLM: application/config.json first, then graph/.env fallback."""
+def llm_gateway_settings() -> dict[str, str] | None:
+    """LiteLLM from application/config.json, then env. None if unavailable."""
     load_env()
     cfg = load_app_config()
 
@@ -126,13 +126,9 @@ def llm_gateway_settings() -> dict[str, str]:
     if cfg_url and cfg_key:
         url, key, source = cfg_url, cfg_key, "application/config.json"
     elif env_url and env_key:
-        url, key, source = env_url, env_key, "graph/.env"
+        url, key, source = env_url, env_key, "env"
     else:
-        raise SystemExit(
-            "LiteLLM gateway is not configured.\n"
-            "Set llm_gateway_url / llm_gateway_key in application/config.json,\n"
-            "or LLM_GATEWAY_URL / LLM_GATEWAY_KEY in graph/.env (fallback)."
-        )
+        return None
 
     model = (os.getenv("GRAPHIFY_LLM_MODEL") or DEFAULT_LLM_MODEL).strip()
     return {
@@ -141,4 +137,36 @@ def llm_gateway_settings() -> dict[str, str]:
         "base_url": f"{url}/v1",
         "model": model,
         "source": source,
+    }
+
+
+def graphify_llm_model() -> str:
+    """GRAPHIFY_LLM_MODEL from .env (gateway id or Bedrock-friendly alias)."""
+    load_env()
+    return (os.getenv("GRAPHIFY_LLM_MODEL") or DEFAULT_LLM_MODEL).strip()
+
+
+def bedrock_settings() -> dict[str, str]:
+    """Bedrock runtime settings when LiteLLM gateway is not configured.
+
+    Uses application/config.json ``region`` and AWS default credential chain
+    (same pattern as agentic-work graph / langgraph).
+    """
+    load_env()
+    cfg = load_app_config()
+    region = (
+        (os.getenv("GRAPHIFY_BEDROCK_REGION") or "").strip()
+        or (os.getenv("AWS_REGION") or "").strip()
+        or (os.getenv("AWS_DEFAULT_REGION") or "").strip()
+        or (cfg.get("region") or "").strip()
+        or "us-west-2"
+    )
+    model = (
+        (os.getenv("GRAPHIFY_BEDROCK_MODEL") or "").strip()
+        or graphify_llm_model()
+    )
+    return {
+        "region": region,
+        "model": model,
+        "source": "bedrock",
     }

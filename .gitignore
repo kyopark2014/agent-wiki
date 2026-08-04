@@ -8,4 +8,3 @@ application/data/
 *.pyc
 graph/corpus/
 graph/out/
-graph/.env

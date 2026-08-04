@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Extract knowledge graph from corpus/ via LiteLLM — no /graphify skill.
+"""Extract knowledge graph from corpus/ via LiteLLM or Bedrock.
 
-Uses OpenAI-compatible LiteLLM gateway for semantic extraction, then
-graphifyy (build/cluster/export) for graph.json.
+Uses OpenAI-compatible LiteLLM gateway when configured; otherwise AWS
+Bedrock Converse (boto3 credential chain).
 """
 
 from __future__ import annotations

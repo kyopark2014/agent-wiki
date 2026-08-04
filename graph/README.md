@@ -94,7 +94,8 @@ flowchart TB
 ```bash
 cd agent-wiki/graph
 python -m pip install -r requirements.txt
-# application/config.json 또는 graph/.env 에 LiteLLM gateway 설정
+# LiteLLM gateway: application/config.json (llm_gateway_url / llm_gateway_key)
+# If unset: Bedrock Converse via AWS credentials
 
 python run_pipeline.py
 # 또는 스모크:
@@ -118,24 +119,22 @@ python publish_out.py
 ## LLM 설정
 
 1. **우선**: `application/config.json`의 `llm_gateway_url` / `llm_gateway_key`
-2. **fallback**: `graph/.env`의 `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY`
-   (config에 gateway가 없을 때만)
+2. **fallback**(옵션): `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY` 환경변수
+3. **gateway 없음**: AWS Bedrock Converse
+   - 리전: `GRAPHIFY_BEDROCK_REGION` → `AWS_REGION` → `config.json` `region`
+   - 모델: `GRAPHIFY_BEDROCK_MODEL` 또는 `GRAPHIFY_LLM_MODEL` 매핑
+     (`claude-haiku-4-5` → `us.anthropic.claude-haiku-4-5-20251001-v1:0`)
+   - 자격증명: boto3 기본 credential chain (IAM / `~/.aws`)
 
-모델은 `GRAPHIFY_LLM_MODEL`(기본 `claude-haiku-4-5`). Claude / GPT / Gemini 등 LiteLLM 게이트웨이 id를 그대로 쓰면 됩니다.
-
-```bash
-# config.json에 gateway가 없으면:
-cp .env.example .env
-# LLM_GATEWAY_URL=...
-# LLM_GATEWAY_KEY=...
-```
+모델은 `graph/.env`의 `GRAPHIFY_LLM_MODEL`(기본 `claude-haiku-4-5`).
+Gateway 사용 시 Claude / GPT / Gemini 등 LiteLLM id를 그대로 쓰면 됩니다.
 
 관련 코드:
 
 | 파일 | 역할 |
 |------|------|
-| `lib/config.py` | 경로 + `llm_gateway_settings()` (config → `.env` fallback) |
-| `lib/llm.py` | OpenAI-compatible `chat/completions` → JSON |
+| `lib/config.py` | 경로 + gateway / Bedrock 설정 |
+| `lib/llm.py` | LiteLLM `/v1` → JSON, 없으면 Bedrock Converse |
 | `lib/semantic.py` | corpus chunk → 추출 프롬프트 (SKILL Part B 대체) |
 | `lib/build_graph.py` | graphifyy `build_from_json` / `cluster` / `to_json` |
 
@@ -145,7 +144,7 @@ cp .env.example .env
 agent-wiki/graph/
 ├── README.md
 ├── requirements.txt
-├── .env.example
+├── .env                   # TASKS_DB_PATH, GRAPHIFY_LLM_MODEL (no secrets)
 ├── export_corpus.py       # tasks.db → corpus/
 ├── run_extract.py         # corpus → out/graph.json (LLM)
 ├── publish_out.py         # graph.json → out/graph_{user}.html
