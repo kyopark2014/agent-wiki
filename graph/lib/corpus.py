@@ -38,10 +38,20 @@ def safe_slug(raw: str, *, max_len: int = 48) -> str:
 _safe_slug = safe_slug
 
 
-def turn_filename(turn: Turn, index: int) -> str:
+def turn_filename(turn: Turn, index: int | None = None) -> str:
+    """Stable corpus filename keyed by user message id (index kept for compat)."""
     user = safe_slug(turn.task.user_id)
+    msg_id = safe_slug(turn.user.id, max_len=64)
+    # Prefer stable names so delta export + content-hash cache survive re-runs.
+    # Legacy indexed names are still accepted when reading existing corpora.
+    if index is None:
+        return f"turn-{user}-{msg_id}.md"
     title = safe_slug(turn.task.title or "task", max_len=40)
     return f"turn-{index:04d}-{user}-{title}-{turn.user.id[:8]}.md"
+
+
+def stable_turn_filename(turn: Turn) -> str:
+    return turn_filename(turn, index=None)
 
 
 def turn_to_markdown(
@@ -100,21 +110,64 @@ def export_turns(
     reply_max: int = 3000,
     clean: bool = True,
 ) -> list[Path]:
-    """Write turn markdown files into out_dir. Returns written paths."""
+    """Write turn markdown files into out_dir. Returns written paths.
+
+    Filenames are stable by message id so incremental export does not reshuffle
+    paths (graphify cache keys include the resolved path).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     if clean:
         for old in out_dir.glob("turn-*.md"):
             old.unlink()
 
     written: list[Path] = []
-    for i, turn in enumerate(turns, 1):
-        path = out_dir / turn_filename(turn, i)
+    for turn in turns:
+        path = out_dir / stable_turn_filename(turn)
         path.write_text(
             turn_to_markdown(turn, prompt_max=prompt_max, reply_max=reply_max),
             encoding="utf-8",
         )
         written.append(path)
     return written
+
+
+def sync_corpus_turns(
+    turns: list[Turn],
+    out_dir: Path,
+    *,
+    prompt_max: int = 2000,
+    reply_max: int = 3000,
+    full: bool = False,
+) -> tuple[list[Path], list[dict]]:
+    """Write corpus turns; in delta mode only create/update changed files.
+
+    Returns (all_corpus_paths_for_turns, changed_items) where changed_items are
+    dicts ready for extract_queue.enqueue (message_id, task_id, corpus_path).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    keep = {stable_turn_filename(t) for t in turns}
+    # Always drop orphan/legacy turn files so corpus matches current turns.
+    for old in out_dir.glob("turn-*.md"):
+        if old.name not in keep:
+            old.unlink()
+
+    all_paths: list[Path] = []
+    changed: list[dict] = []
+    for turn in turns:
+        path = out_dir / stable_turn_filename(turn)
+        text = turn_to_markdown(turn, prompt_max=prompt_max, reply_max=reply_max)
+        prev = path.read_text(encoding="utf-8") if path.is_file() else None
+        if prev != text:
+            path.write_text(text, encoding="utf-8")
+            changed.append(
+                {
+                    "message_id": turn.user.id,
+                    "task_id": turn.task.id,
+                    "corpus_path": str(path.resolve()),
+                }
+            )
+        all_paths.append(path)
+    return all_paths, changed
 
 
 def preview_turn(turn: Turn, *, max_chars: int = 1500) -> dict[str, Any]:

@@ -153,6 +153,31 @@ def _save_fingerprint(user_id: str, fingerprint: dict[str, Any]) -> None:
         logger.exception("Failed to save graph fingerprint for %s", user_id)
 
 
+def _queue_has_work(user_id: str) -> bool:
+    """True when out/.extract_queue.json still has pending/inflight items."""
+    from application import utils
+
+    artifact = Path(utils.get_user_graph_dir(user_id)) / "out"
+    graph_dir = str(_GRAPH_DIR)
+    inserted = False
+    if graph_dir not in sys.path:
+        sys.path.insert(0, graph_dir)
+        inserted = True
+    try:
+        from lib.extract_queue import has_work  # type: ignore
+
+        return bool(has_work(artifact))
+    except Exception:
+        logger.exception("Failed to read extract queue for %s", user_id)
+        return False
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(graph_dir)
+            except ValueError:
+                pass
+
+
 def _source_unchanged(user_id: str) -> bool:
     """True when graph.html exists and tasks.db fingerprint matches last extract."""
     from application import utils
@@ -198,7 +223,7 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
             logger.info("Graph job already running for %s — skip", user_id)
             return state.to_dict()
 
-        if not force and _source_unchanged(user_id):
+        if not force and _source_unchanged(user_id) and not _queue_has_work(user_id):
             state.status = "skipped_unchanged"
             state.error = None
             state.updated_at = _now()
@@ -228,7 +253,7 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
 
     thread = threading.Thread(
         target=_run_pipeline,
-        args=(user_id,),
+        args=(user_id, force),
         name=f"graph-job-{user_id[:32]}",
         daemon=True,
     )
@@ -236,13 +261,13 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
     return get_job_status(user_id)
 
 
-def _run_pipeline(user_id: str) -> None:
+def _run_pipeline(user_id: str, force: bool = False) -> None:
     with _lock:
         state = _get_or_create(user_id)
         state.status = "running"
         state.updated_at = _now()
 
-    logger.info("Graph pipeline starting for user=%s", user_id)
+    logger.info("Graph pipeline starting for user=%s force=%s", user_id, force)
     try:
         # Ensure session-storage workspace exists before the CLI configures env dirs.
         try:
@@ -259,6 +284,8 @@ def _run_pipeline(user_id: str) -> None:
                 "--user",
                 user_id,
             ]
+            if force:
+                cmd.append("--full")
             logger.info("+ %s (cwd=%s)", " ".join(cmd), _GRAPH_DIR)
             subprocess.check_call(cmd, cwd=str(_GRAPH_DIR))
         fingerprint = _compute_source_fingerprint(user_id)

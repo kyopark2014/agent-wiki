@@ -145,29 +145,37 @@ def _dedupe_merge(parts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def extract_corpus(
-    corpus_dir: Path,
-    artifact_dir: Path,
-    *,
-    deep: bool = False,
-    chunk_size: int = 8,
-    limit: int | None = None,
-    model: str | None = None,
-) -> dict[str, Any]:
-    """Extract semantic graph from corpus/*.md using LiteLLM + optional file cache.
+def _load_existing_extract(artifact_dir: Path) -> dict[str, Any] | None:
+    path = artifact_dir / ".graphify_extract.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    data.setdefault("nodes", [])
+    data.setdefault("edges", [])
+    data.setdefault("hyperedges", [])
+    data.setdefault("input_tokens", 0)
+    data.setdefault("output_tokens", 0)
+    return data
 
-    ``artifact_dir`` receives ``.graphify_extract.json`` and ``cache/`` (shared
-    with publish output when using session storage ``out/``).
-    """
-    import graphify.cache as gc
-    from graphify.cache import check_semantic_cache, save_semantic_cache
 
-    corpus_dir = corpus_dir.resolve()
-    artifact_dir = artifact_dir.resolve()
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+def _write_extract(artifact_dir: Path, extraction: dict[str, Any]) -> None:
+    out_path = artifact_dir / ".graphify_extract.json"
+    out_path.write_text(
+        json.dumps(extraction, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(
+        f"Extracted: {len(extraction['nodes'])} nodes, {len(extraction['edges'])} edges "
+        f"(tokens in={extraction['input_tokens']} out={extraction['output_tokens']})"
+    )
 
-    # graphify.cache defaults to root/graphify-out/cache; flatten to artifact_dir/cache.
-    # graphifyy>=0.9 calls cache_dir(root, kind, prompt_fp) — keep that signature.
+
+def _install_flat_cache_dir(gc: Any) -> Any:
+    """Point graphify cache at artifact/cache; returns original cache_dir."""
     _orig_cache_dir = gc.cache_dir
 
     def _flat_cache_dir(
@@ -190,6 +198,240 @@ def extract_corpus(
         return d
 
     gc.cache_dir = _flat_cache_dir  # type: ignore[assignment]
+    return _orig_cache_dir
+
+
+def _log_llm_model(model: str) -> None:
+    gw = llm_gateway_settings()
+    if gw:
+        print(f"LLM: {model} (gateway: {gw.get('source')})")
+    else:
+        bs = bedrock_settings()
+        print(
+            f"LLM: {resolve_bedrock_model_id(model)} "
+            f"(bedrock:{bs['region']})"
+        )
+
+
+def extract_from_queue(
+    corpus_dir: Path,
+    artifact_dir: Path,
+    *,
+    deep: bool = False,
+    chunk_size: int = 8,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """LLM-extract only queued corpus files and merge into existing extract JSON."""
+    import graphify.cache as gc
+    from graphify.cache import check_semantic_cache, save_semantic_cache
+
+    from lib.extract_queue import (
+        claim_pending,
+        complete_items,
+        fail_items,
+        has_work,
+    )
+
+    corpus_dir = corpus_dir.resolve()
+    artifact_dir = artifact_dir.resolve()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    if not has_work(artifact_dir):
+        existing = _load_existing_extract(artifact_dir)
+        if existing is not None and (existing.get("nodes") or existing.get("edges")):
+            print("Extract queue empty — reusing existing .graphify_extract.json")
+            return existing
+        print("Extract queue empty — falling back to full corpus extract")
+        return extract_corpus(
+            corpus_dir,
+            artifact_dir,
+            deep=deep,
+            chunk_size=chunk_size,
+            model=model,
+        )
+
+    claimed = claim_pending(artifact_dir)
+    paths: list[Path] = []
+    for item in claimed:
+        p = Path(item.get("corpus_path") or "")
+        if p.is_file():
+            paths.append(p.resolve())
+        else:
+            print(f"  WARNING: queued file missing: {p}")
+
+    if not paths:
+        fail_items(artifact_dir, claimed, error="corpus files missing")
+        existing = _load_existing_extract(artifact_dir)
+        if existing is not None:
+            return existing
+        raise SystemExit("Extract queue had items but no corpus files on disk")
+
+    _orig = _install_flat_cache_dir(gc)
+    try:
+        abs_paths = [str(p) for p in paths]
+        cached_nodes, cached_edges, cached_hyper, uncached = check_semantic_cache(
+            abs_paths, root=artifact_dir
+        )
+        print(
+            f"Queue: {len(paths)} file(s) · cache hit {len(paths) - len(uncached)} · "
+            f"extract {len(uncached)}"
+        )
+
+        model = model or default_model()
+        _log_llm_model(model)
+
+        new_parts: list[dict[str, Any]] = []
+        uncached_paths = [Path(p) for p in uncached]
+        chunks = chunk_files(uncached_paths, chunk_size=chunk_size)
+        failed_paths: set[str] = set()
+        for i, chunk in enumerate(chunks, 1):
+            names = ", ".join(p.name for p in chunk)
+            print(f"  [{i}/{len(chunks)}] extracting {len(chunk)} file(s): {names[:80]}…")
+            try:
+                part = extract_chunk(
+                    chunk,
+                    corpus_root=corpus_dir,
+                    chunk_num=i,
+                    total_chunks=len(chunks),
+                    deep=deep,
+                    model=model,
+                )
+                new_parts.append(part)
+                save_semantic_cache(
+                    part.get("nodes") or [],
+                    part.get("edges") or [],
+                    part.get("hyperedges") or [],
+                    root=artifact_dir,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"  WARNING: chunk {i} failed: {exc}")
+                chunk_items = [
+                    item
+                    for item in claimed
+                    if str(Path(item.get("corpus_path") or "").resolve())
+                    in {str(p.resolve()) for p in chunk}
+                ]
+                fail_items(artifact_dir, chunk_items, error=str(exc))
+                failed_paths.update(str(p.resolve()) for p in chunk)
+
+        merged_new = (
+            _dedupe_merge(new_parts)
+            if new_parts
+            else {
+                "nodes": [],
+                "edges": [],
+                "hyperedges": [],
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
+        )
+        existing = _load_existing_extract(artifact_dir) or {
+            "nodes": [],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        # Drop prior nodes/edges for files we just re-extracted so updates win.
+        refreshed = {str(p.resolve()) for p in uncached_paths} - failed_paths
+        if refreshed:
+            existing = {
+                "nodes": [
+                    n
+                    for n in (existing.get("nodes") or [])
+                    if str(Path(n.get("source_file") or "").resolve()) not in refreshed
+                ],
+                "edges": [
+                    e
+                    for e in (existing.get("edges") or [])
+                    if str(Path(e.get("source_file") or "").resolve()) not in refreshed
+                ],
+                "hyperedges": [
+                    h
+                    for h in (existing.get("hyperedges") or [])
+                    if str(Path(h.get("source_file") or "").resolve()) not in refreshed
+                ],
+                "input_tokens": int(existing.get("input_tokens") or 0),
+                "output_tokens": int(existing.get("output_tokens") or 0),
+            }
+
+        extraction = _dedupe_merge(
+            [
+                existing,
+                {
+                    "nodes": cached_nodes,
+                    "edges": cached_edges,
+                    "hyperedges": cached_hyper,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                },
+                merged_new,
+            ]
+        )
+        # Drop nodes/edges that no longer map to corpus files (legacy paths etc.).
+        valid_sources = {
+            str(p.resolve())
+            for p in corpus_dir.rglob("*.md")
+            if p.is_file() and p.name != ".gitkeep"
+        }
+
+        def _src_ok(src: Any) -> bool:
+            if not src:
+                return True
+            try:
+                return str(Path(str(src)).resolve()) in valid_sources
+            except OSError:
+                return False
+
+        extraction = {
+            "nodes": [n for n in extraction["nodes"] if _src_ok(n.get("source_file"))],
+            "edges": [e for e in extraction["edges"] if _src_ok(e.get("source_file"))],
+            "hyperedges": [
+                h for h in extraction["hyperedges"] if _src_ok(h.get("source_file"))
+            ],
+            "input_tokens": extraction.get("input_tokens", 0),
+            "output_tokens": extraction.get("output_tokens", 0),
+        }
+        _write_extract(artifact_dir, extraction)
+
+        done_paths = {str(p) for p in paths} - failed_paths
+        complete_items(
+            artifact_dir,
+            message_ids={
+                (i.get("message_id") or "").strip()
+                for i in claimed
+                if (i.get("message_id") or "").strip()
+                and str(Path(i.get("corpus_path") or "").resolve()) in done_paths
+            },
+            corpus_paths=done_paths,
+        )
+        return extraction
+    finally:
+        gc.cache_dir = _orig  # type: ignore[assignment]
+
+
+def extract_corpus(
+    corpus_dir: Path,
+    artifact_dir: Path,
+    *,
+    deep: bool = False,
+    chunk_size: int = 8,
+    limit: int | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Extract semantic graph from corpus/*.md using LiteLLM + optional file cache.
+
+    ``artifact_dir`` receives ``.graphify_extract.json`` and ``cache/`` (shared
+    with publish output when using session storage ``out/``).
+    """
+    import graphify.cache as gc
+    from graphify.cache import check_semantic_cache, save_semantic_cache
+
+    corpus_dir = corpus_dir.resolve()
+    artifact_dir = artifact_dir.resolve()
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    _orig_cache_dir = _install_flat_cache_dir(gc)
 
     try:
         files = sorted(corpus_dir.rglob("*.md"))
@@ -209,15 +451,7 @@ def extract_corpus(
         )
 
         model = model or default_model()
-        gw = llm_gateway_settings()
-        if gw:
-            print(f"LLM: {model} (gateway: {gw.get('source')})")
-        else:
-            bs = bedrock_settings()
-            print(
-                f"LLM: {resolve_bedrock_model_id(model)} "
-                f"(bedrock:{bs['region']})"
-            )
+        _log_llm_model(model)
 
         new_parts: list[dict[str, Any]] = []
         uncached_paths = [Path(p) for p in uncached]
@@ -264,14 +498,7 @@ def extract_corpus(
             ]
         )
 
-        out_path = artifact_dir / ".graphify_extract.json"
-        out_path.write_text(
-            json.dumps(extraction, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        print(
-            f"Extracted: {len(extraction['nodes'])} nodes, {len(extraction['edges'])} edges "
-            f"(tokens in={extraction['input_tokens']} out={extraction['output_tokens']})"
-        )
+        _write_extract(artifact_dir, extraction)
         return extraction
     finally:
         gc.cache_dir = _orig_cache_dir  # type: ignore[assignment]
