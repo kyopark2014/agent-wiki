@@ -114,6 +114,8 @@ def get_contents_type(file_name):
         content_type = "text/markdown"
     elif file_name.lower().endswith((".png")):
         content_type = "image/png"
+    elif file_name.lower().endswith((".html", ".htm")):
+        content_type = "text/html; charset=utf-8"
     else:
         content_type = "no info"    
     return content_type
