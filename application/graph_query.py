@@ -61,6 +61,65 @@ def _score_label(label: str, terms: list[str]) -> int:
     return sum(1 for t in terms if t in low)
 
 
+def _text_term_score(text: str, terms: list[str]) -> int:
+    if not text or not terms:
+        return 0
+    low = text.lower()
+    return sum(1 for t in terms if t in low)
+
+
+def _find_nodes_by_source_content(
+    G,
+    terms: list[str],
+    roots: list[Path],
+    *,
+    limit: int = 24,
+) -> list[tuple[int, str]]:
+    """Score nodes by whether their source_file body contains query terms."""
+    by_file: dict[str, list[str]] = {}
+    for nid, data in G.nodes(data=True):
+        src = str(data.get("source_file") or "").strip()
+        if src:
+            by_file.setdefault(src, []).append(nid)
+
+    scored: list[tuple[int, str]] = []
+    checked = 0
+    for src, nids in by_file.items():
+        if checked >= 80:
+            break
+        allowed = _allowed_source(Path(src), roots)
+        if allowed is None:
+            continue
+        checked += 1
+        try:
+            raw = allowed.read_bytes()
+            if len(raw) > _MAX_FILE_BYTES:
+                raw = raw[:_MAX_FILE_BYTES]
+            text = raw.decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        score = _text_term_score(text, terms)
+        if score <= 0:
+            continue
+        for nid in nids:
+            # Prefer higher-degree hubs slightly so BFS starts somewhere useful.
+            boost = min(3, int(G.degree(nid) or 0) // 3)
+            scored.append((score * 10 + boost, nid))
+
+    scored.sort(reverse=True)
+    # unique node ids preserving rank
+    out: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for score, nid in scored:
+        if nid in seen:
+            continue
+        seen.add(nid)
+        out.append((score, nid))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _allowed_source(path: Path, roots: list[Path]) -> Path | None:
     try:
         resolved = path.expanduser().resolve()
@@ -181,6 +240,25 @@ def query_user_graph(
             scored.append((score, nid))
     scored.sort(reverse=True)
     start_nodes = [nid for _, nid in scored[:3]]
+    match_via = "label"
+
+    # Document search: also match corpus/source body text.
+    # Needed when labels are English ("Weather…") but the query is Korean ("날씨").
+    content_scored = _find_nodes_by_source_content(G, terms, roots)
+    if not start_nodes:
+        start_nodes = [nid for _, nid in content_scored[:3]]
+        match_via = "source"
+    elif content_scored:
+        # Augment starts with strong content matches not already selected.
+        chosen = set(start_nodes)
+        for _, nid in content_scored:
+            if nid in chosen:
+                continue
+            start_nodes.append(nid)
+            chosen.add(nid)
+            if len(start_nodes) >= 3:
+                break
+        match_via = "label+source"
 
     if not start_nodes:
         return {
@@ -192,6 +270,8 @@ def query_user_graph(
             "sources": [],
             "message": f"No matching nodes found for: {', '.join(terms)}",
         }
+
+    content_score_by_id = {nid: score for score, nid in content_scored}
 
     subgraph_nodes: set[str] = set()
     subgraph_edges: list[tuple[str, str]] = []
@@ -223,7 +303,10 @@ def query_user_graph(
             frontier = next_frontier
 
     def relevance(nid: str) -> int:
-        return _score_label(str(G.nodes[nid].get("label") or ""), terms)
+        return (
+            _score_label(str(G.nodes[nid].get("label") or ""), terms) * 10
+            + int(content_score_by_id.get(nid, 0))
+        )
 
     ranked_nodes = sorted(subgraph_nodes, key=relevance, reverse=True)
 
@@ -367,6 +450,7 @@ def query_user_graph(
     return {
         "question": question,
         "mode": mode,
+        "match_via": match_via,
         "start_nodes": [
             {"id": nid, "label": G.nodes[nid].get("label") or nid}
             for nid in start_nodes
