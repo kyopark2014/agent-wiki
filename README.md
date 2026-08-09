@@ -171,13 +171,58 @@ graph.json (+ communities)
   application/graph_query.query_user_graph()
 ```
 
+
+
+
+### 패턴별 특징과 장단점
+
+세 패턴은 **같은 `graph.json`**을 쓰며, 차이점은 “무엇을 한눈에 보이게 하느냐”입니다.
+
+#### Force Atlas (pattern1)
+
+`forceAtlas2Based`로 커뮤니티가 벌어지고, degree가 큰 노드는 크게 보이며 엣지는 커뮤니티 컬러 + 관계 라벨(INFERRED는 점선)을 표시합니다.
+
+| 장점 | 단점 |
+|------|------|
+| 허브·커뮤니티 구조가 직관적 | 노드·라벨이 많아 밀집 그래프에서 번잡 |
+| 관계 종류·신뢰도를 캔버스에서 바로 확인 | Force Atlas 계산이 상대적으로 무거움 |
+| 탐색·설명용으로 균형이 좋음 | “전체 지형”보다 “국소 구조” 중심 |
+
+**적합:** 개념이 어떻게 묶이고 어떤 관계인지 설명할 때.
+
 Force atlas로 보여주는 graph 화면입니다.
 
 <img width="800" alt="image" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
 
+#### Neo4j Explore (pattern2)
+
+Explore/Bloom 느낌의 **작은 점 + 얇은 회색 곡선**. 엣지 라벨·화살표는 거의 숨기고, physics는 빠른 `barnesHut`입니다.
+
+| 장점 | 단점 |
+|------|------|
+| 대규모에서도 지형·클러스터가 잘 보임 | 관계명·방향은 hover/상세로만 확인 |
+| 시각 노이즈가 적어 스크롤·줌이 편함 | 허브 크기 차이가 작아 중요도 파악이 약함 |
+| 안정화·렌더가 비교적 가벼움 | “누가 누구를 참조하는지” 설명에는 약함 |
+
+**적합:** 큰 그래프의 전체 모양·밀도·커뮤니티 분포를 훑을 때.
+
 Neo4j explore로 보여주는 graph 화면입니다.
 
 <img width="1091" height="580" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
+
+#### Holistic View (pattern3)
+
+로드 직후 `fit`으로 전체를 담고, `ellipse` 라벨 노드 + 관계명(대문자)·화살표를 표시합니다. Force Atlas이지만 overlap 회피를 강하게 잡습니다.
+
+| 장점 | 단점 |
+|------|------|
+| 전체 overview + 관계 라벨을 동시에 보여줌 | 엣지 라벨이 겹치면 가독성이 급격히 떨어짐 |
+| Neo4j Browser식 “스키마 한눈에”에 가까움 | 노드 수·엣지 수가 많으면 글자가 포화 |
+| 관계 중심 설명·데모에 유리 | Explore만큼 깔끔한 지형감은 약함 |
+
+**적합:** 중간 규모에서 관계 종류까지 포함한 한 장 요약을 보여줄 때.
+
+**한 줄 요약:** 구조·허브 → **Force Atlas**, 규모·지형 → **Neo4j Explore**, 관계 라벨까지 한눈에 → **Holistic View**.
 
 Holistic view의 graph 화면입니다.
 
