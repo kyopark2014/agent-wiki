@@ -192,7 +192,7 @@ graph.json (+ communities)
 
 Force atlas로 보여주는 graph 화면입니다.
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
+<img width="900" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
 
 #### Neo4j Explore (pattern2)
 
@@ -208,7 +208,7 @@ Explore/Bloom 느낌의 **작은 점 + 얇은 회색 곡선**. 엣지 라벨·�
 
 Neo4j explore로 보여주는 graph 화면입니다.
 
-<img width="1091" height="580" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
+<img width="900" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
 
 #### Holistic View (pattern3)
 
@@ -226,24 +226,9 @@ Neo4j explore로 보여주는 graph 화면입니다.
 
 Holistic view의 graph 화면입니다.
 
-<img width="1091" height="585" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
+<img width="900" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
 
 
-### 문서검색
-
-그래프 HTML의 **문서검색**은 엔티티 이름 필터와 별개로, 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 보여주는 흐름입니다.
-
-1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. `문서검색` 버튼 → 패널에서 질문 입력 → `POST /api/graph/query` (`credentials: same-origin`).
-2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
-3. **시작 노드 매칭**
-   - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
-   - 노드 **label** 부분 일치로 상위 후보 선정.
-   - label이 비어도(또는 보강용으로) 노드의 `source_file` **본문**에 질의어가 있으면 점수를 올려 시작 노드로 사용 — 라벨은 영어인데 질의가 한국어인 경우 등.
-4. **그래프 순회** — 기본 **BFS**(깊이 3), 옵션 **DFS**(깊이 6). 관련 노드·엣지를 모은 뒤 relevance로 정렬하고 token `budget`으로 truncate.
-5. **소스 excerpt** — 매칭 노드의 `source_file`을 허용 루트 안에서만 읽고, 질의어·라벨·`source_location`이 겹치는 문단을 뽑아 패널에 표시합니다.
-6. **그래프 하이라이트** — 응답 노드 opacity를 올리고, 칩 클릭 시 해당 노드로 `focus`합니다.
-
-CLI의 `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 내 문서검색이 재사용합니다. 파이프라인·LLM 설정은 [graph/README.md](./graph/README.md)를 참고하세요.
 
 ## 검색하는 방법
 
@@ -420,6 +405,32 @@ Human(Q2) → AI(A2) → Human(Q3) → AI(tool_calls) → ToolMessage → AI(A3)
 - `history_mode=Enable`일 때 `MemorySaver` checkpointer에는 **전체 대화 이력**이 저장됩니다.
 - trim은 LLM 컨텍스트 윈도우 관리용이며, 저장된 history를 삭제하지 않습니다.
 - 애플리케이션 로그에서 `trimmed messages from X to Y (max_turns=5)`로 trim 여부를 확인할 수 있습니다.
+
+
+## 문서검색
+
+그래프 HTML의 **문서검색**은 엔티티 이름 필터와 별개로, 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 보여주는 흐름입니다.
+
+1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. `문서검색` 버튼 → 패널에서 질문 입력 → `POST /api/graph/query` (`credentials: same-origin`).
+2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
+3. **시작 노드 매칭**
+   - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
+   - 노드 **label** 부분 일치로 상위 후보 선정.
+   - label이 비어도(또는 보강용으로) 노드의 `source_file` **본문**에 질의어가 있으면 점수를 올려 시작 노드로 사용 — 라벨은 영어인데 질의가 한국어인 경우 등.
+4. **그래프 순회** — 기본 **BFS**(깊이 3), 옵션 **DFS**(깊이 6). 관련 노드·엣지를 모은 뒤 relevance로 정렬하고 token `budget`으로 truncate.
+5. **소스 excerpt** — 매칭 노드의 `source_file`을 허용 루트 안에서만 읽고, 질의어·라벨·`source_location`이 겹치는 문단을 뽑아 패널에 표시합니다.
+6. **그래프 하이라이트** — 응답 노드 opacity를 올리고, 칩 클릭 시 해당 노드로 `focus`합니다.
+
+CLI의 `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 내 문서검색이 재사용합니다. 파이프라인·LLM 설정은 [graph/README.md](./graph/README.md)를 참고하세요.
+
+문서 검색을 하면 아래와 같이 시작 노드로 부터 관련 노드를 찾습니다.
+
+<img width="420" height="415" alt="image" src="https://github.com/user-attachments/assets/6c352951-74cc-4ef7-a621-a2b8a6941645" />
+
+결과적으로 Corpus로 부터 아래와 같이 관련문서를 가져올 수 있습니다.
+
+<img width="368" height="451" alt="image" src="https://github.com/user-attachments/assets/00f5d8cf-c0ac-427f-b1e5-6ace6ba1daca" />
+
 
 ## 실행 방법
 
