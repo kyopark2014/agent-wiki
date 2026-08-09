@@ -50,10 +50,12 @@ class SessionResponse(BaseModel):
     picture: str | None = None
     llm_gateway_ready: bool = False
     knowledge_graph_enabled: bool = True
+    graph_pattern: str = "pattern1"
 
 
 class SessionSettingsPatch(BaseModel):
     knowledge_graph_enabled: bool | None = None
+    graph_pattern: str | None = None
 
 
 def _google_client_id() -> str:
@@ -187,15 +189,19 @@ def get_optional_user_id(request: Request) -> str | None:
     return resolve_cookie_user_id(request.cookies.get(SESSION_COOKIE))
 
 
-def _kick_graph_job(user_id: str) -> None:
-    """Fire-and-forget background graph extract (respects cooldown / running lock)."""
+def _kick_graph_job(user_id: str, *, force: bool = False) -> None:
+    """Fire-and-forget background graph extract.
+
+    When force=False, respects fingerprint/cooldown/running lock.
+    When force=True (e.g. Knowledge Graph toggled on), bypass those skips.
+    """
     if not utils.is_knowledge_graph_enabled(user_id):
         logger.info("Knowledge Graph disabled for %s — skip extract", user_id)
         return
     try:
         from application.graph_jobs import ensure_graph_job
 
-        ensure_graph_job(user_id)
+        ensure_graph_job(user_id, force=force)
     except Exception:
         logger.exception("Failed to schedule graph job for %s", user_id)
 
@@ -217,6 +223,9 @@ def _session_response(
         ),
         knowledge_graph_enabled=bool(
             settings.get("knowledge_graph_enabled", True)
+        ),
+        graph_pattern=utils.normalize_graph_pattern(
+            settings.get("graph_pattern", utils.DEFAULT_GRAPH_PATTERN)
         ),
     )
 
@@ -318,13 +327,29 @@ def patch_session_settings(
 ) -> SessionResponse:
     """Update per-user feature settings (e.g. Knowledge Graph toggle)."""
     user_id = require_user_id(request)
-    updates: dict[str, bool] = {}
+    updates: dict[str, object] = {}
     if body.knowledge_graph_enabled is not None:
         updates["knowledge_graph_enabled"] = body.knowledge_graph_enabled
+    if body.graph_pattern is not None:
+        updates["graph_pattern"] = utils.normalize_graph_pattern(body.graph_pattern)
+    prev_pattern = utils.get_graph_pattern(user_id)
     if updates:
         utils.save_user_settings(user_id, **updates)
+    # Turning Knowledge Graph on force-runs extract (bypass unchanged/cooldown skips).
     if updates.get("knowledge_graph_enabled") is True:
-        _kick_graph_job(user_id)
+        _kick_graph_job(user_id, force=True)
+    new_pattern = updates.get("graph_pattern")
+    if (
+        isinstance(new_pattern, str)
+        and new_pattern != prev_pattern
+        and utils.is_knowledge_graph_enabled(user_id)
+    ):
+        try:
+            from application.graph_jobs import republish_graph_html
+
+            republish_graph_html(user_id, pattern=new_pattern)
+        except Exception:
+            logger.exception("Failed to republish graph HTML for %s", user_id)
     return _session_response(user_id)
 
 
