@@ -10,11 +10,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from application.api.routes_auth import require_user_id
-from application.graph_jobs import ensure_graph_job, get_job_status
+from application.graph_jobs import ensure_graph_job, get_job_status, republish_graph_html
 from application.graph_query import query_user_graph
 from application import utils
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
+
+# Marker present in current pattern HTML templates (document search panel).
+_GRAPH_HTML_CURRENT_MARKER = "toggleAskPanel"
 
 
 def user_graph_html_path(user_id: str) -> Path:
@@ -24,6 +27,26 @@ def user_graph_html_path(user_id: str) -> Path:
 
 def user_graph_json_path(user_id: str) -> Path:
     return Path(utils.get_user_graph_dir(user_id)) / "out" / "graph.json"
+
+
+def _ensure_graph_html_current(user_id: str, path: Path) -> Path:
+    """Re-render graph.html when an older publish lacks the document-search UI."""
+    if not path.is_file():
+        return path
+    try:
+        sample = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return path
+    if _GRAPH_HTML_CURRENT_MARKER in sample:
+        return path
+    graph_json = user_graph_json_path(user_id)
+    if not graph_json.is_file():
+        return path
+    try:
+        republish_graph_html(user_id)
+    except Exception:
+        return path
+    return path
 
 
 class GraphQueryRequest(BaseModel):
@@ -84,6 +107,8 @@ def get_user_graph(request: Request):
     """Open the logged-in user's knowledge graph from session storage."""
     user_id = require_user_id(request)
     path = user_graph_html_path(user_id)
+    if path.is_file():
+        path = _ensure_graph_html_current(user_id, path)
     if not path.is_file():
         job = get_job_status(user_id)
         status = job.get("status") or "idle"
