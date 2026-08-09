@@ -136,17 +136,7 @@ pip install graphifyy && graphify install
 detect() → extract() → build_graph() → cluster() → analyze() → report() → export()
 ```
 
-앱 UI Knowledge Graph에서는 추출 HTML을 세 가지 시각화 패턴으로 볼 수 있습니다. 상세는 [graph/README.md](./graph/README.md)를 참고하세요.
-
-### Graph Extraction
-
-| 패턴 | 메뉴 이름 | 파일 | 특징 |
-|------|-----------|------|------|
-| **pattern1** | Force Atlas | [pattern1_html.py](./graph/lib/pattern1_html.py) | `forceAtlas2Based` 레이아웃. 큰 노드·컬러 곡선 엣지·관계 라벨. |
-| **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | 어두운 캔버스, 작은 점 노드, 얇은 회색 곡선 엣지, 허브 라벨. |
-| **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | 어두운 배경 전체-fit overview. ellipse 라벨 노드 + 관계명 엣지. |
-
-선택값은 `settings.json`의 `graph_pattern`에 저장되며, 재추출 없이 HTML만 다시 생성합니다 (`patterns.py`).
+앱 UI Knowledge Graph에서는 추출 HTML을 세 가지 시각화 패턴으로 볼 수 있습니다. 패턴·문서검색 상세는 아래 [Graph](#graph) 및 [graph/README.md](./graph/README.md)를 참고하세요.
 
 ### 지원 파일
 
@@ -155,6 +145,47 @@ detect() → extract() → build_graph() → cluster() → analyze() → report(
 - Papers: .pdf
 - Images: .png, .jpg, .webp (analyzed with vision)
 - Video/Audio: .mp4, .mp3, .wav (transcribed with Whisper)
+
+## Graph
+
+`graph/`는 Agent 대화·코퍼스에서 뽑은 `graph.json`을 **vis-network** HTML로 publish합니다. 같은 그래프 데이터를 `patterns.py`가 세 가지 UI 패턴으로 렌더하며, 선택값은 사용자 `settings.json`의 `graph_pattern`에 저장됩니다. 패턴 전환 시 재추출 없이 HTML만 다시 생성합니다.
+
+| 패턴 | 메뉴 이름 | 구현 | 레이아웃 / 비주얼 |
+|------|-----------|------|-------------------|
+| **pattern1** | Force Atlas | [pattern1_html.py](./graph/lib/pattern1_html.py) | `forceAtlas2Based`. degree에 비례한 큰 `dot` 노드, 커뮤니티 컬러 곡선 엣지(`curvedCCW`), 관계 라벨 표시. INFERRED는 점선. |
+| **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | Neo4j Explore/Bloom 스타일. 어두운 캔버스, 작은 `dot` 노드, 얇은 회색 연속 곡선 엣지, 허브 위주 라벨. physics는 `barnesHut`. |
+| **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | Neo4j Browser식 전체 overview. 어두운 배경에서 로드 직후 `fit`. `ellipse` 라벨 노드 + 관계명(대문자) 엣지. `forceAtlas2Based`. |
+
+공통 UI: 그룹(커뮤니티) 범례 필터, 엔티티 텍스트 검색, 노드 클릭 상세(출처·관계), 패턴 전환 버튼, **문서검색** 패널.
+
+```text
+graph.json (+ communities)
+        │
+        ▼
+  patterns.write_pattern_html(pattern1|2|3)
+        │
+        ▼
+  out/graph.html  ← Ask panel (ask_panel.py) 삽입
+        │  POST /api/graph/query
+        ▼
+  application/graph_query.query_user_graph()
+```
+
+### 문서검색
+
+그래프 HTML의 **문서검색**은 엔티티 이름 필터와 별개로, 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 보여주는 흐름입니다.
+
+1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. `문서검색` 버튼 → 패널에서 질문 입력 → `POST /api/graph/query` (`credentials: same-origin`).
+2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
+3. **시작 노드 매칭**
+   - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
+   - 노드 **label** 부분 일치로 상위 후보 선정.
+   - label이 비어도(또는 보강용으로) 노드의 `source_file` **본문**에 질의어가 있으면 점수를 올려 시작 노드로 사용 — 라벨은 영어인데 질의가 한국어인 경우 등.
+4. **그래프 순회** — 기본 **BFS**(깊이 3), 옵션 **DFS**(깊이 6). 관련 노드·엣지를 모은 뒤 relevance로 정렬하고 token `budget`으로 truncate.
+5. **소스 excerpt** — 매칭 노드의 `source_file`을 허용 루트 안에서만 읽고, 질의어·라벨·`source_location`이 겹치는 문단을 뽑아 패널에 표시합니다.
+6. **그래프 하이라이트** — 응답 노드 opacity를 올리고, 칩 클릭 시 해당 노드로 `focus`합니다.
+
+CLI의 `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 내 문서검색이 재사용합니다. 파이프라인·LLM 설정은 [graph/README.md](./graph/README.md)를 참고하세요.
 
 ## 검색하는 방법
 
