@@ -171,6 +171,19 @@ graph.json (+ communities)
   application/graph_query.query_user_graph()
 ```
 
+Force atlas로 보여주는 graph 화면입니다.
+
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
+
+Neo4j explore로 보여주는 graph 화면입니다.
+
+<img width="1091" height="580" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
+
+Holistic view의 graph 화면입니다.
+
+<img width="1091" height="585" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
+
+
 ### 문서검색
 
 그래프 HTML의 **문서검색**은 엔티티 이름 필터와 별개로, 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 보여주는 흐름입니다.
