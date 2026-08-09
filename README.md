@@ -136,6 +136,17 @@ pip install graphifyy && graphify install
 detect() → extract() → build_graph() → cluster() → analyze() → report() → export()
 ```
 
+앱 UI Knowledge Graph에서는 추출 HTML을 세 가지 시각화 패턴으로 볼 수 있습니다. 상세는 [graph/README.md](./graph/README.md)를 참고하세요.
+
+### Graph Extraction
+
+| 패턴 | 메뉴 이름 | 파일 | 특징 |
+|------|-----------|------|------|
+| **pattern1** | Force Atlas | [pattern1_html.py](./graph/lib/pattern1_html.py) | `forceAtlas2Based` 레이아웃. 큰 노드·컬러 곡선 엣지·관계 라벨. |
+| **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | 어두운 캔버스, 작은 점 노드, 얇은 회색 곡선 엣지, 허브 라벨. |
+| **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | 어두운 배경 전체-fit overview. ellipse 라벨 노드 + 관계명 엣지. |
+
+선택값은 `settings.json`의 `graph_pattern`에 저장되며, 재추출 없이 HTML만 다시 생성합니다 (`patterns.py`).
 
 ### 지원 파일
 

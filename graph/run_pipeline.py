@@ -144,6 +144,10 @@ def main() -> None:
         cmd = [py, "publish_out.py", "--graph", str(graph)]
         if args.user:
             cmd += ["--user", args.user]
+            from lib.patterns import resolve_graph_pattern
+
+            env["GRAPH_PATTERN"] = resolve_graph_pattern(user_id=args.user)
+            cmd += ["--pattern", env["GRAPH_PATTERN"]]
         _run(cmd, env=env)
 
     print()

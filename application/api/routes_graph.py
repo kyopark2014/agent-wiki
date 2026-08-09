@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel, Field
 
 from application.api.routes_auth import require_user_id
 from application.graph_jobs import ensure_graph_job, get_job_status
+from application.graph_query import query_user_graph
 from application import utils
 
 router = APIRouter(prefix="/api/graph", tags=["graph"])
@@ -17,6 +20,16 @@ router = APIRouter(prefix="/api/graph", tags=["graph"])
 def user_graph_html_path(user_id: str) -> Path:
     """Session storage only: …/{user}/graph/out/graph.html"""
     return Path(utils.user_graph_html_path(user_id))
+
+
+def user_graph_json_path(user_id: str) -> Path:
+    return Path(utils.get_user_graph_dir(user_id)) / "out" / "graph.json"
+
+
+class GraphQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    mode: Literal["bfs", "dfs"] = "bfs"
+    budget: int = Field(2000, ge=200, le=8000)
 
 
 @router.get("/status")
@@ -98,3 +111,38 @@ def get_user_graph(request: Request):
             "Content-Disposition": "inline",
         },
     )
+
+
+@router.post("/query")
+def query_graph(body: GraphQueryRequest, request: Request) -> dict:
+    """BFS/DFS traversal over the user's graph.json with source-text excerpts."""
+    user_id = require_user_id(request)
+    if not utils.is_knowledge_graph_enabled(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Knowledge Graph is disabled in Settings",
+        )
+    graph_json = user_graph_json_path(user_id)
+    if not graph_json.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="그래프가 아직 없습니다. 먼저 지식 그래프를 생성하세요.",
+        )
+    graph_root = Path(utils.get_user_graph_dir(user_id))
+    try:
+        return query_user_graph(
+            graph_json,
+            body.question,
+            mode=body.mode,
+            budget=body.budget,
+            allowed_roots=[graph_root, graph_root / "corpus", graph_root / "out"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500,
+            detail=f"query failed: {exc}",
+        ) from exc

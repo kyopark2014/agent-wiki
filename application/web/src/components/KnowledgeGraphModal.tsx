@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type GraphStatus } from "../api";
 import { CloseIcon } from "./SidebarIcons";
@@ -13,6 +13,8 @@ export function KnowledgeGraphModal({ userId, title, onClose }: Props) {
   const [status, setStatus] = useState<GraphStatus | null>(null);
   const [frameSrc, setFrameSrc] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
+  const [patternBusy, setPatternBusy] = useState(false);
+  const patternBusyRef = useRef(false);
 
   const applyStatus = useCallback((next: GraphStatus) => {
     setStatus(next);
@@ -69,6 +71,30 @@ export function KnowledgeGraphModal({ userId, title, onClose }: Props) {
     };
   }, [applyStatus, userId]);
 
+
+  useEffect(() => {
+    async function onMessage(e: MessageEvent) {
+      const data = e.data;
+      if (!data || data.type !== "graph-pattern") return;
+      const pattern = String(data.pattern || "");
+      if (pattern !== "pattern1" && pattern !== "pattern2" && pattern !== "pattern3") return;
+      if (patternBusyRef.current) return;
+      patternBusyRef.current = true;
+      setPatternBusy(true);
+      try {
+        await api.patchSessionSettings({ graph_pattern: pattern });
+        setFrameSrc(`/api/graph?t=${Date.now()}`);
+      } catch (err) {
+        setPollError(err instanceof Error ? err.message : String(err));
+      } finally {
+        patternBusyRef.current = false;
+        setPatternBusy(false);
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
   const busy = status?.status === "queued" || status?.status === "running";
   const showFrame = Boolean(frameSrc && status?.exists);
 
@@ -96,7 +122,7 @@ export function KnowledgeGraphModal({ userId, title, onClose }: Props) {
             className="knowledge-graph-frame"
             title={`${userId} knowledge graph`}
             src={frameSrc!}
-            sandbox="allow-scripts allow-same-origin allow-popups"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           />
         ) : (
           <div className="knowledge-graph-placeholder">
@@ -136,8 +162,10 @@ export function KnowledgeGraphModal({ userId, title, onClose }: Props) {
             )}
           </div>
         )}
-        {showFrame && busy ? (
-          <div className="knowledge-graph-banner">그래프 갱신 중…</div>
+        {showFrame && (busy || patternBusy) ? (
+          <div className="knowledge-graph-banner">
+            {patternBusy ? "패턴 전환 중…" : "그래프 갱신 중…"}
+          </div>
         ) : null}
       </div>
     </div>,

@@ -1,0 +1,712 @@
+"""Pattern 1 — Force Atlas graph with Neo4j Explore-style chrome (search/legend/controls)."""
+
+from __future__ import annotations
+
+import html
+import json
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+import networkx as nx
+
+from .ask_panel import ASK_PANEL_CSS, ASK_PANEL_HTML, ASK_PANEL_JS
+
+# agentcore_knowledge_graph.html 과 같은 팔레트
+GROUP_COLORS = [
+    "#FF6B35",
+    "#4ECDC4",
+    "#45B7D1",
+    "#96CEB4",
+    "#DDA0DD",
+    "#FFD93D",
+    "#F7B2B7",
+    "#C8E6C9",
+    "#B0BEC5",
+    "#81D4FA",
+    "#FFAB91",
+    "#CE93D8",
+    "#A5D6A7",
+    "#FFF59D",
+    "#90CAF9",
+]
+
+
+def _wrap_label(text: str, width: int = 16) -> str:
+    text = (text or "").strip() or "(unnamed)"
+    if len(text) <= width:
+        return text
+    parts: list[str] = []
+    buf = ""
+    for token in re.split(r"(\s+)", text):
+        if len(buf) + len(token) > width and buf:
+            parts.append(buf.strip())
+            buf = token.lstrip()
+        else:
+            buf += token
+    if buf.strip():
+        parts.append(buf.strip())
+    if not parts:
+        parts = [text[:width]]
+    return "\n".join(parts[:4])
+
+
+def _infer_community_labels(
+    G: nx.Graph,
+    communities: dict[int, list[str]],
+) -> dict[int, str]:
+    labels: dict[int, str] = {}
+    degree = dict(G.degree())
+    for cid, members in communities.items():
+        ranked = sorted(members, key=lambda n: degree.get(n, 0), reverse=True)
+        top = []
+        for nid in ranked[:3]:
+            lab = str(G.nodes[nid].get("label") or nid)
+            lab = re.sub(r"\s+", " ", lab).strip()
+            if lab and lab not in top:
+                top.append(lab[:28])
+        labels[cid] = " · ".join(top) if top else f"그룹 {cid}"
+    return labels
+
+
+def _node_description(G: nx.Graph, node_id: str) -> str:
+    data = G.nodes[node_id]
+    lines: list[str] = []
+    src = data.get("source_file") or ""
+    if src:
+        lines.append(f"출처: {Path(str(src)).name}")
+    captured = data.get("captured_at") or ""
+    if captured:
+        lines.append(f"시각: {captured}")
+    author = data.get("author") or ""
+    if author:
+        lines.append(f"사용자: {author}")
+
+    rels: list[str] = []
+    for _, nbr, edata in G.edges(node_id, data=True):
+        rel = edata.get("relation") or "related"
+        conf = edata.get("confidence") or ""
+        nbr_label = G.nodes[nbr].get("label") or nbr
+        tag = f"{rel}"
+        if conf and conf != "EXTRACTED":
+            tag += f" [{conf}]"
+        rels.append(f"→ {tag} → {nbr_label}")
+    if rels:
+        lines.append("관계:")
+        lines.extend(rels[:8])
+        if len(rels) > 8:
+            lines.append(f"… 외 {len(rels) - 8}개")
+    return "\n".join(lines) if lines else "관련 설명이 없습니다."
+
+
+def to_pattern1_html(
+    G: nx.Graph,
+    communities: dict[int, list[str]],
+    output_path: str | Path,
+    *,
+    title: str,
+    subtitle: str | None = None,
+    community_labels: dict[int, str] | None = None,
+) -> None:
+    """Write Force Atlas knowledge graph HTML with Pattern 2 chrome."""
+    community_labels = community_labels or _infer_community_labels(G, communities)
+    node_community = {
+        nid: cid for cid, members in communities.items() for nid in members
+    }
+    degree = dict(G.degree())
+    max_deg = max(degree.values()) if degree else 1
+
+    raw_nodes: list[dict[str, Any]] = []
+    descriptions: dict[str, str] = {}
+    for nid, data in G.nodes(data=True):
+        cid = int(node_community.get(nid, 0))
+        color = GROUP_COLORS[cid % len(GROUP_COLORS)]
+        deg = degree.get(nid, 1)
+        size = 14 + 28 * (deg / max_deg)
+        label = str(data.get("label") or nid)
+        raw_nodes.append(
+            {
+                "id": nid,
+                "label": _wrap_label(label),
+                "group": str(cid),
+                "size": round(size, 1),
+                "color": color,
+                "degree": deg,
+            }
+        )
+        descriptions[nid] = _node_description(G, nid)
+
+    hub = max(G.nodes, key=lambda n: degree.get(n, 0)) if G.number_of_nodes() else None
+
+    raw_edges: list[dict[str, Any]] = []
+    for u, v, data in G.edges(data=True):
+        src = data.get("_src") or u
+        tgt = data.get("_tgt") or v
+        if src not in G or tgt not in G:
+            src, tgt = u, v
+        cid = int(node_community.get(src, node_community.get(u, 0)))
+        color = GROUP_COLORS[cid % len(GROUP_COLORS)]
+        conf = data.get("confidence") or "EXTRACTED"
+        raw_edges.append(
+            {
+                "from": src,
+                "to": tgt,
+                "label": data.get("relation") or "",
+                "color": color,
+                "dashed": conf != "EXTRACTED",
+                "confidence": conf,
+            }
+        )
+
+    legend_items = []
+    for cid in sorted(communities.keys(), key=lambda c: -len(communities[c])):
+        legend_items.append(
+            {
+                "id": str(cid),
+                "label": community_labels.get(cid, f"그룹 {cid}"),
+                "color": GROUP_COLORS[cid % len(GROUP_COLORS)],
+                "count": len(communities[cid]),
+            }
+        )
+
+    subtitle = subtitle or (
+        "graphify로 추출된 지식 그래프 · 노드를 클릭하면 상세 정보와 관계를 확인할 수 있습니다"
+    )
+
+    payload = {
+        "title": title,
+        "subtitle": subtitle,
+        "nodes": len(raw_nodes),
+        "edges": len(raw_edges),
+        "groups": len(communities),
+        "hub": hub,
+        "rawNodes": raw_nodes,
+        "rawEdges": raw_edges,
+        "descriptions": descriptions,
+        "legend": legend_items,
+    }
+
+    html_doc = _render_template(payload)
+    dest = Path(output_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    tmp.write_text(html_doc, encoding="utf-8")
+    os.replace(tmp, dest)
+
+
+def _render_template(payload: dict[str, Any]) -> str:
+    title = html.escape(payload["title"])
+    data_json = json.dumps(
+        {
+            "hub": payload["hub"],
+            "rawNodes": payload["rawNodes"],
+            "rawEdges": payload["rawEdges"],
+            "descriptions": payload["descriptions"],
+            "legend": payload["legend"],
+        },
+        ensure_ascii=False,
+    )
+    data_json = data_json.replace("</", "<\\/")
+
+    doc = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{
+    height: 100%;
+    overflow: hidden;
+    background: #151922;
+    color: #e8eaed;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }}
+
+  #network-container {{
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(ellipse at center, #1c2128 0%, #151922 70%);
+    outline: none;
+  }}
+  #mynetwork {{
+    width: 100%;
+    height: 100%;
+    outline: none;
+  }}
+  #mynetwork .vis-network,
+  #mynetwork canvas {{
+    outline: none !important;
+  }}
+
+  .search-panel {{
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    z-index: 4;
+    width: min(320px, calc(100vw - 36px));
+  }}
+  .search-box {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(28, 33, 44, 0.94);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px 14px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+  }}
+  .search-box svg {{
+    width: 18px;
+    height: 18px;
+    color: #9aa3b2;
+    flex-shrink: 0;
+  }}
+  #search {{
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e8eaed;
+    font-size: 14px;
+  }}
+  #search::placeholder {{ color: #7d8696; }}
+
+  .legend-panel {{
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    z-index: 4;
+    width: min(280px, calc(100vw - 36px));
+    max-height: min(52vh, 420px);
+    display: flex;
+    flex-direction: column;
+    background: rgba(28, 33, 44, 0.94);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    box-shadow: 0 10px 36px rgba(0,0,0,0.4);
+    overflow: hidden;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }}
+  .legend-panel.is-hidden {{
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+  }}
+  #legend {{
+    overflow-y: auto;
+    padding: 10px 8px 4px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.2) transparent;
+  }}
+  .legend-item {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+  }}
+  .legend-item:hover {{ background: rgba(255,255,255,0.06); }}
+  .legend-item.active {{ background: rgba(255,255,255,0.08); }}
+  .legend-dot {{
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }}
+  .legend-label {{
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: #e8eaed;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }}
+  .legend-count {{
+    font-size: 12px;
+    color: #8b93a3;
+    font-variant-numeric: tabular-nums;
+  }}
+  .browse-all {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    color: #cfd5df;
+    font-size: 13px;
+    cursor: pointer;
+    background: transparent;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    width: 100%;
+    text-align: left;
+  }}
+  .browse-all:hover {{ background: rgba(255,255,255,0.05); }}
+  .browse-all svg {{
+    width: 16px;
+    height: 16px;
+    color: #9aa3b2;
+  }}
+
+  #node-detail {{
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 4;
+    width: min(300px, calc(100vw - 36px));
+    background: rgba(28, 33, 44, 0.96);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 10px 36px rgba(0,0,0,0.4);
+    display: none;
+  }}
+  #node-detail .node-type {{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    margin-bottom: 8px;
+  }}
+  #node-detail h3 {{
+    font-size: 15px;
+    font-weight: 600;
+    color: #f3f4f6;
+    margin-bottom: 8px;
+  }}
+  #node-detail p {{
+    font-size: 12px;
+    color: #9aa3b2;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }}
+  #detail-close {{
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: transparent;
+    border: none;
+    color: #8b93a3;
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+  }}
+
+  .controls {{
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+  }}
+  .controls-row {{
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }}
+  .ctrl-btn {{
+    background: rgba(28, 33, 44, 0.94);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #e8eaed;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.28);
+  }}
+  .ctrl-btn:hover {{ border-color: rgba(255,255,255,0.22); background: rgba(40,46,60,0.96); }}
+  .ctrl-btn.active {{
+    background: #FF6B35;
+    border-color: #FF6B35;
+    color: #0d1117;
+    font-weight: 700;
+  }}
+  .ctrl-btn:disabled {{ opacity: 0.55; cursor: wait; }}
+<<<ASK_PANEL_CSS>>>
+</style>
+</head>
+<body>
+<div id="network-container">
+  <div id="mynetwork"></div>
+
+  <div class="search-panel">
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/>
+        <path d="m20 20-3.5-3.5"/>
+      </svg>
+      <input id="search" type="search" placeholder="Search entities..." autocomplete="off">
+    </div>
+  </div>
+
+  <div id="node-detail">
+    <button type="button" id="detail-close" aria-label="닫기" onclick="hideDetail()">×</button>
+    <div class="node-type" id="detail-type"></div>
+    <h3 id="detail-title"></h3>
+    <p id="detail-desc"></p>
+  </div>
+
+  <div class="legend-panel">
+    <div id="legend"></div>
+    <button type="button" class="browse-all" onclick="filterGroup(null)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+      Browse all
+    </button>
+  </div>
+
+  <div class="controls">
+    <div class="controls-row">
+      <button type="button" class="ctrl-btn pattern-btn active" data-pattern="pattern1" onclick="selectPattern('pattern1')" title="Force Atlas (현재)">Force Atlas</button>
+      <button type="button" class="ctrl-btn pattern-btn" data-pattern="pattern2" onclick="selectPattern('pattern2')" title="Neo4j Explore">Neo4j Explore</button>
+      <button type="button" class="ctrl-btn pattern-btn" data-pattern="pattern3" onclick="selectPattern('pattern3')" title="Holistic View">Holistic View</button>
+    </div>
+    <div class="controls-row">
+      <button class="ctrl-btn" onclick="network.fit({{ animation: {{ duration: 400 }} }})">전체 보기</button>
+      <button class="ctrl-btn" onclick="stabilize()">레이아웃 재정렬</button>
+      <button class="ctrl-btn" onclick="filterGroup(null)">필터 해제</button>
+      <button type="button" class="ctrl-btn ask-btn" onclick="toggleAskPanel()" title="문서검색">문서검색</button>
+    </div>
+  </div>
+<<<ASK_PANEL_HTML>>>
+</div>
+
+<script>
+const DATA = {data_json};
+const rawNodes = DATA.rawNodes;
+const rawEdges = DATA.rawEdges;
+const nodeDescriptions = DATA.descriptions;
+const legend = DATA.legend;
+let activeGroup = null;
+
+function darkenColor(hex, factor) {{
+  const r = Math.floor(parseInt(hex.slice(1,3), 16) * (1-factor));
+  const g = Math.floor(parseInt(hex.slice(3,5), 16) * (1-factor));
+  const b = Math.floor(parseInt(hex.slice(5,7), 16) * (1-factor));
+  return `rgb(${{r}},${{g}},${{b}})`;
+}}
+function lightenColor(hex, factor) {{
+  const r = Math.min(255, Math.floor(parseInt(hex.slice(1,3), 16) + 255 * factor));
+  const g = Math.min(255, Math.floor(parseInt(hex.slice(3,5), 16) + 255 * factor));
+  const b = Math.min(255, Math.floor(parseInt(hex.slice(5,7), 16) + 255 * factor));
+  return `rgb(${{r}},${{g}},${{b}})`;
+}}
+
+function hideDetail() {{
+  document.getElementById('node-detail').style.display = 'none';
+}}
+
+function toggleLegend() {{
+  document.querySelector('.legend-panel').classList.toggle('is-hidden');
+}}
+
+function markLegendActive(group) {{
+  document.querySelectorAll('.legend-item').forEach(el => {{
+    el.classList.toggle('active', group != null && el.dataset.group === String(group));
+  }});
+}}
+
+const legendEl = document.getElementById('legend');
+legend.forEach(item => {{
+  const div = document.createElement('div');
+  div.className = 'legend-item';
+  div.dataset.group = item.id;
+  div.onclick = () => filterGroup(item.id);
+  div.innerHTML = `<div class="legend-dot" style="background:${{item.color}}"></div>` +
+    `<span class="legend-label" title="${{item.label}}">${{item.label}}</span>` +
+    `<span class="legend-count">${{item.count}}</span>`;
+  legendEl.appendChild(div);
+}});
+
+const maxDeg = Math.max(...rawNodes.map(n => n.degree || 1), 1);
+const visNodes = rawNodes.map(n => ({{
+  id: n.id,
+  label: n.label,
+  group: n.group,
+  size: n.size,
+  color: {{
+    background: n.color,
+    border: darkenColor(n.color, 0.3),
+    highlight: {{ background: lightenColor(n.color, 0.2), border: "#ffffff" }},
+    hover: {{ background: lightenColor(n.color, 0.1), border: "#ffffff" }}
+  }},
+  font: {{
+    color: '#fff',
+    size: (n.degree || 1) >= maxDeg * 0.35 ? 12 : 0,
+    face: 'Segoe UI',
+    multi: true
+  }},
+  shadow: {{ enabled: true, color: n.color + '66', size: 8, x: 0, y: 0 }},
+  borderWidth: 1.5,
+  shape: 'dot',
+  title: n.label.replace(/\\n/g, ' ')
+}}));
+
+const visEdges = rawEdges.map((e, i) => ({{
+  id: i,
+  from: e.from,
+  to: e.to,
+  label: e.label,
+  color: {{
+    color: e.color + '99',
+    highlight: e.color,
+    hover: e.color
+  }},
+  dashes: e.dashed || false,
+  arrows: {{ to: {{ enabled: true, scaleFactor: 0.55 }} }},
+  font: {{ size: 9, color: '#6e7681', align: 'middle', background: '#161b22', strokeWidth: 0 }},
+  width: e.dashed ? 1 : 1.5,
+  smooth: {{ type: 'curvedCCW', roundness: 0.18 }},
+  title: e.label + (e.confidence ? ` [${{e.confidence}}]` : '')
+}}));
+
+const container = document.getElementById('mynetwork');
+const networkData = {{
+  nodes: new vis.DataSet(visNodes),
+  edges: new vis.DataSet(visEdges)
+}};
+
+const options = {{
+  physics: {{
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {{
+      gravitationalConstant: -90,
+      centralGravity: 0.012,
+      springLength: 140,
+      springConstant: 0.06,
+      damping: 0.5,
+      avoidOverlap: 0.7
+    }},
+    stabilization: {{ enabled: true, iterations: 180, updateInterval: 25 }}
+  }},
+  interaction: {{
+    hover: true,
+    tooltipDelay: 120,
+    zoomView: true,
+    dragView: true,
+    keyboard: {{ enabled: true, bindToWindow: false }}
+  }},
+  layout: {{ improvedLayout: true }}
+}};
+
+const network = new vis.Network(container, networkData, options);
+container.setAttribute('tabindex', '0');
+
+network.on('click', function(params) {{
+  if (params.nodes.length === 0) {{
+    hideDetail();
+    // empty canvas (not an edge hit): toggle legend visibility
+    if (params.edges.length === 0) toggleLegend();
+    return;
+  }}
+  const nodeId = params.nodes[0];
+  const node = rawNodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const leg = legend.find(l => l.id === node.group);
+  const detail = document.getElementById('node-detail');
+  const typeEl = document.getElementById('detail-type');
+  const titleEl = document.getElementById('detail-title');
+  const descEl = document.getElementById('detail-desc');
+
+  typeEl.textContent = leg ? leg.label : (`그룹 ${{node.group}}`);
+  typeEl.style.background = node.color + '33';
+  typeEl.style.color = node.color;
+  typeEl.style.border = `1px solid ${{node.color}}66`;
+  titleEl.textContent = node.label.replace(/\\n/g, ' ');
+  descEl.textContent = nodeDescriptions[nodeId] || '관련 설명이 없습니다.';
+  detail.style.display = 'block';
+}});
+
+network.on('hoverNode', () => {{ container.style.cursor = 'pointer'; }});
+network.on('blurNode', () => {{ container.style.cursor = 'default'; }});
+
+network.once('stabilizationIterationsDone', function() {{
+  if (DATA.hub) {{
+    network.focus(DATA.hub, {{ scale: 0.85, animation: {{ duration: 800 }} }});
+  }} else {{
+    network.fit();
+  }}
+}});
+
+function filterGroup(group) {{
+  activeGroup = group;
+  markLegendActive(group);
+  if (!group) {{
+    networkData.nodes.update(rawNodes.map(n => ({{ id: n.id, hidden: false, opacity: 1 }})));
+    return;
+  }}
+  networkData.nodes.update(rawNodes.map(n => ({{
+    id: n.id,
+    hidden: false,
+    opacity: n.group === group ? 1 : 0.12
+  }})));
+}}
+
+function stabilize() {{
+  const ids = networkData.nodes.getIds();
+  const spread = Math.max(800, Math.sqrt(ids.length) * 180);
+  networkData.nodes.update(ids.map(id => ({{
+    id,
+    x: (Math.random() - 0.5) * spread,
+    y: (Math.random() - 0.5) * spread
+  }})));
+  network.setOptions({{ physics: {{ enabled: true }} }});
+  network.once('stabilizationIterationsDone', function() {{
+    network.fit({{ animation: {{ duration: 600 }} }});
+  }});
+  network.stabilize(180);
+}}
+
+function selectPattern(pattern) {{
+  pattern = String(pattern || '');
+  if (pattern !== 'pattern1' && pattern !== 'pattern2' && pattern !== 'pattern3') return;
+  if (pattern === 'pattern1') return;
+  document.querySelectorAll('.pattern-btn').forEach(btn => {{ btn.disabled = true; }});
+  if (window.parent && window.parent !== window) {{
+    window.parent.postMessage({{ type: 'graph-pattern', pattern }}, '*');
+  }}
+}}
+
+document.getElementById('search').addEventListener('input', (ev) => {{
+  const q = (ev.target.value || '').trim().toLowerCase();
+  if (!q) {{
+    networkData.nodes.update(rawNodes.map(n => ({{
+      id: n.id,
+      hidden: false,
+      opacity: (!activeGroup || n.group === activeGroup) ? 1 : 0.12
+    }})));
+    return;
+  }}
+  const hits = [];
+  networkData.nodes.update(rawNodes.map(n => {{
+    const hit = (n.label || '').toLowerCase().includes(q) || String(n.id).toLowerCase().includes(q);
+    if (hit) hits.push(n.id);
+    return {{ id: n.id, hidden: !hit, opacity: 1 }};
+  }}));
+  if (hits.length === 1) network.focus(hits[0], {{ scale: 1.1, animation: true }});
+}});
+<<<ASK_PANEL_JS>>>
+</script>
+</body>
+</html>
+"""
+    return (
+        doc.replace("<<<ASK_PANEL_CSS>>>", ASK_PANEL_CSS)
+        .replace("<<<ASK_PANEL_HTML>>>", ASK_PANEL_HTML)
+        .replace("<<<ASK_PANEL_JS>>>", ASK_PANEL_JS)
+    )

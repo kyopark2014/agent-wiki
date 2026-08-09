@@ -128,9 +128,34 @@ def user_graph_html_path(user_id: str | None) -> str:
     return os.path.join(SESSION_STORAGE_DIR, segment, "graph", "out", "graph.html")
 
 
-_DEFAULT_USER_SETTINGS: dict[str, bool] = {
+GRAPH_PATTERNS = ("pattern1", "pattern2", "pattern3")
+DEFAULT_GRAPH_PATTERN = "pattern1"
+
+_DEFAULT_USER_SETTINGS: dict[str, object] = {
     "knowledge_graph_enabled": True,
+    "graph_pattern": DEFAULT_GRAPH_PATTERN,
 }
+
+
+def normalize_graph_pattern(value: object | None) -> str:
+    raw = str(value or "").strip().lower().replace(" ", "").replace("_", "")
+    aliases = {
+        "pattern1": "pattern1",
+        "p1": "pattern1",
+        "1": "pattern1",
+        "forceatlas": "pattern1",
+        "pattern2": "pattern2",
+        "p2": "pattern2",
+        "2": "pattern2",
+        "neo4j": "pattern2",
+        "neo4jexplore": "pattern2",
+        "pattern3": "pattern3",
+        "p3": "pattern3",
+        "3": "pattern3",
+        "holistic": "pattern3",
+        "holisticview": "pattern3",
+    }
+    return aliases.get(raw, DEFAULT_GRAPH_PATTERN)
 
 
 def get_user_settings_path(user_id: str | None) -> str:
@@ -139,7 +164,7 @@ def get_user_settings_path(user_id: str | None) -> str:
     return os.path.join(SESSION_STORAGE_DIR, segment, "settings.json")
 
 
-def load_user_settings(user_id: str | None) -> dict[str, bool]:
+def load_user_settings(user_id: str | None) -> dict[str, object]:
     """Load per-user UI/feature settings. Missing file → defaults (KG on)."""
     settings = dict(_DEFAULT_USER_SETTINGS)
     path = get_user_settings_path(user_id)
@@ -151,12 +176,14 @@ def load_user_settings(user_id: str | None) -> dict[str, bool]:
         if isinstance(raw, dict):
             if "knowledge_graph_enabled" in raw:
                 settings["knowledge_graph_enabled"] = bool(raw["knowledge_graph_enabled"])
+            if "graph_pattern" in raw:
+                settings["graph_pattern"] = normalize_graph_pattern(raw.get("graph_pattern"))
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("Failed to load user settings %s: %s", path, e)
     return settings
 
 
-def save_user_settings(user_id: str | None, **updates: bool) -> dict[str, bool]:
+def save_user_settings(user_id: str | None, **updates: object) -> dict[str, object]:
     """Merge updates into per-user settings.json and return the full settings."""
     segment = sanitize_user_path_segment(user_id)
     if not segment:
@@ -168,8 +195,10 @@ def save_user_settings(user_id: str | None, **updates: bool) -> dict[str, bool]:
     os.makedirs(user_dir, exist_ok=True)
     settings = load_user_settings(user_id)
     for key, value in updates.items():
-        if key in _DEFAULT_USER_SETTINGS:
+        if key == "knowledge_graph_enabled":
             settings[key] = bool(value)
+        elif key == "graph_pattern":
+            settings[key] = normalize_graph_pattern(value)
     path = get_user_settings_path(user_id)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
@@ -181,6 +210,14 @@ def save_user_settings(user_id: str | None, **updates: bool) -> dict[str, bool]:
 def is_knowledge_graph_enabled(user_id: str | None) -> bool:
     """True when Knowledge Graph feature is on (default)."""
     return bool(load_user_settings(user_id).get("knowledge_graph_enabled", True))
+
+
+def get_graph_pattern(user_id: str | None) -> str:
+    """Selected Knowledge Graph HTML pattern (pattern1|pattern2|pattern3)."""
+    return normalize_graph_pattern(
+        load_user_settings(user_id).get("graph_pattern", DEFAULT_GRAPH_PATTERN)
+    )
+
 
 
 def get_user_skills_list_path(user_id: str | None) -> str:

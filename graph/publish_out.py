@@ -34,8 +34,18 @@ def main() -> None:
     )
     parser.add_argument("--out", type=Path, default=None, help="Output dir (default: out/)")
     parser.add_argument("--user", default=None)
+    parser.add_argument(
+        "--pattern",
+        default=None,
+        help="HTML pattern: pattern1|pattern2|pattern3 (default: user settings / pattern1)",
+    )
     parser.add_argument("--min-nodes", type=int, default=1)
     parser.add_argument("--collect", action="store_true")
+    parser.add_argument(
+        "--republish",
+        action="store_true",
+        help="Re-render graph.html from existing out/graph.json (no extract)",
+    )
     parser.add_argument(
         "--src",
         type=Path,
@@ -46,6 +56,17 @@ def main() -> None:
 
     dest = (args.out or out_dir()).expanduser().resolve()
     default_src = graphify_out_dir()
+
+    if args.republish:
+        from lib.out_graphs import republish_html_from_json
+
+        path = republish_html_from_json(
+            dest, user_id=args.user, pattern=args.pattern
+        )
+        if path is None:
+            raise SystemExit(f"No graph.json under {dest}")
+        print(f"Republished → {path}")
+        return
 
     if args.collect:
         if not args.user:
@@ -68,7 +89,11 @@ def main() -> None:
         )
 
     results = publish_user_graphs(
-        graph, dest, user=args.user, min_nodes=args.min_nodes
+        graph,
+        dest,
+        user=args.user,
+        min_nodes=args.min_nodes,
+        pattern=args.pattern,
     )
     if not results:
         raise SystemExit("No user subgraphs written")

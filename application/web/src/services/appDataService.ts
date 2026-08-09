@@ -26,6 +26,7 @@ export const appDataService = {
     userId: string | null;
     llmGatewayReady: boolean;
     knowledgeGraphEnabled: boolean;
+    graphPattern: string;
   }> {
     try {
       const config = await api.getConfig();
@@ -36,6 +37,7 @@ export const appDataService = {
         userId,
         llmGatewayReady: Boolean(session?.llm_gateway_ready),
         knowledgeGraphEnabled: session?.knowledge_graph_enabled ?? true,
+        graphPattern: session?.graph_pattern || "pattern1",
       };
     } catch (error) {
       throw sanitizeError(error, "Failed to load application configuration.");

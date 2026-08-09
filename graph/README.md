@@ -157,7 +157,11 @@ agent-wiki/graph/
 │   ├── tasks_db.py
 │   ├── corpus.py
 │   ├── out_graphs.py
-│   └── rich_html.py       # agentcore 스타일 HTML
+│   ├── patterns.py        # pattern1|2|3 디스패치
+│   ├── pattern1_html.py   # Force Atlas
+│   ├── pattern2_html.py   # Neo4j Explore 스타일
+│   ├── pattern3_html.py   # Holistic View
+│   └── rich_html.py       # pattern1 호환 래퍼
 ├── corpus/                # gitignore
 └── out/                   # gitignore (graph.json, cache/, graph_{user}.html)
 ```

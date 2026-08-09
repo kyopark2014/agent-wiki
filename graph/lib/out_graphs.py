@@ -70,12 +70,13 @@ def write_user_graph(
     *,
     user_id: str,
     out_dir: Path,
+    pattern: str | None = None,
 ) -> dict[str, Path]:
-    """Cluster + export rich HTML/JSON. Writes out/graph.html (+ graph.json)."""
+    """Cluster + export pattern HTML/JSON. Writes out/graph.html (+ graph.json)."""
     from graphify.cluster import cluster
     from graphify.export import to_json
 
-    from lib.rich_html import to_rich_html
+    from lib.patterns import resolve_graph_pattern, write_pattern_html
 
     out_dir.mkdir(parents=True, exist_ok=True)
     html_path = out_dir / "graph.html"
@@ -89,7 +90,9 @@ def write_user_graph(
     tmp_json = json_path.with_suffix(json_path.suffix + ".tmp")
     to_json(H, communities, str(tmp_json))
     os.replace(tmp_json, json_path)
-    to_rich_html(
+    pid = pattern or resolve_graph_pattern(user_id=user_id)
+    write_pattern_html(
+        pid,
         H,
         communities,
         html_path,
@@ -108,11 +111,16 @@ def publish_user_graphs(
     *,
     user: str | None = None,
     min_nodes: int = 1,
+    pattern: str | None = None,
 ) -> list[dict[str, Any]]:
     """Split graph.json by author → out/graph.html (+ graph.json)."""
+    from lib.patterns import resolve_graph_pattern
+
     G = _load_graph(graph_json)
     groups = group_nodes_by_user(G)
     results: list[dict[str, Any]] = []
+    pid = pattern or resolve_graph_pattern(user_id=user)
+
 
     for user_id, node_ids in sorted(groups.items(), key=lambda x: (-len(x[1]), x[0])):
         if user is not None and user_id != user and safe_slug(user_id) != safe_slug(user):
@@ -120,7 +128,9 @@ def publish_user_graphs(
         if len(node_ids) < min_nodes:
             continue
         H = subgraph_for_user(G, node_ids)
-        paths = write_user_graph(H, user_id=user_id, out_dir=out_dir)
+        paths = write_user_graph(
+            H, user_id=user_id, out_dir=out_dir, pattern=pid
+        )
         if not paths:
             continue
         results.append(
@@ -129,6 +139,7 @@ def publish_user_graphs(
                 "slug": safe_slug(user_id),
                 "nodes": H.number_of_nodes(),
                 "edges": H.number_of_edges(),
+                "pattern": pid,
                 **{k: str(v) for k, v in paths.items()},
             }
         )
@@ -137,6 +148,48 @@ def publish_user_graphs(
             break
     return results
 
+
+
+
+def republish_html_from_json(
+    out_dir: Path,
+    *,
+    user_id: str | None = None,
+    pattern: str | None = None,
+) -> Path | None:
+    """Re-render graph.html from existing out/graph.json (no re-extract)."""
+    from graphify.cluster import cluster
+
+    from lib.patterns import resolve_graph_pattern, write_pattern_html
+
+    json_path = out_dir / "graph.json"
+    if not json_path.is_file():
+        return None
+    G = _load_graph(json_path)
+    if G.number_of_nodes() == 0:
+        return None
+    communities: dict[int, list[str]] = {}
+    for nid, data in G.nodes(data=True):
+        cid = data.get("community")
+        if cid is None:
+            continue
+        communities.setdefault(int(cid), []).append(nid)
+    if not communities:
+        communities = cluster(G)
+    html_path = out_dir / "graph.html"
+    pid = pattern or resolve_graph_pattern(user_id=user_id)
+    write_pattern_html(
+        pid,
+        G,
+        communities,
+        html_path,
+        title="Knowledge Graph",
+        subtitle=(
+            "지식 그래프 · 노드 클릭 시 출처·관계 상세를 볼 수 있습니다. "
+            f"({G.number_of_nodes()} nodes / {G.number_of_edges()} edges)"
+        ),
+    )
+    return html_path
 
 def collect_from_graphify_out(
     src: Path,

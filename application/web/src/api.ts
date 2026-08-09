@@ -85,12 +85,15 @@ export interface GraphStatus {
   next_eligible_at?: string | null;
 }
 
+export type GraphPattern = "pattern1" | "pattern2" | "pattern3";
+
 export interface SessionInfo {
   user_id: string;
   name?: string | null;
   picture?: string | null;
   llm_gateway_ready?: boolean;
   knowledge_graph_enabled?: boolean;
+  graph_pattern?: GraphPattern | string;
 }
 
 export const api = {
@@ -111,7 +114,10 @@ export const api = {
       body: JSON.stringify({ user_id }),
     }),
   clearSession: () => request<void>("/api/session", { method: "DELETE" }),
-  patchSessionSettings: (body: { knowledge_graph_enabled?: boolean }) =>
+  patchSessionSettings: (body: {
+    knowledge_graph_enabled?: boolean;
+    graph_pattern?: GraphPattern | string;
+  }) =>
     request<SessionInfo>("/api/session/settings", {
       method: "PATCH",
       body: JSON.stringify(body),

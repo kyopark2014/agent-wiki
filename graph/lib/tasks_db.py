@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 @dataclass
@@ -43,9 +45,56 @@ class Turn:
 def _connect(db_path: Path) -> sqlite3.Connection:
     if not db_path.is_file():
         raise FileNotFoundError(f"tasks.db not found: {db_path}")
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
+
+
+@contextmanager
+def snapshot_db(db_path: Path) -> Iterator[Path]:
+    """Yield a consistent SQLite backup path; cleans up when the block exits.
+
+    Callers should read only the yielded snapshot so concurrent writers to the
+    live tasks.db cannot observe a torn export.
+    """
+    db_path = db_path.expanduser().resolve()
+    if not db_path.is_file():
+        raise FileNotFoundError(f"tasks.db not found: {db_path}")
+
+    tmp = tempfile.NamedTemporaryFile(prefix="tasks_snapshot_", suffix=".db", delete=False)
+    snap_path = Path(tmp.name)
+    tmp.close()
+    src: sqlite3.Connection | None = None
+    dst: sqlite3.Connection | None = None
+    try:
+        src = sqlite3.connect(str(db_path), timeout=5.0)
+        src.execute("PRAGMA busy_timeout=5000")
+        dst = sqlite3.connect(str(snap_path))
+        src.backup(dst)
+        dst.close()
+        dst = None
+        src.close()
+        src = None
+        yield snap_path
+    finally:
+        if dst is not None:
+            try:
+                dst.close()
+            except Exception:
+                pass
+        if src is not None:
+            try:
+                src.close()
+            except Exception:
+                pass
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(str(snap_path) + suffix)
+            try:
+                if candidate.is_file():
+                    candidate.unlink()
+            except OSError:
+                pass
 
 
 def _parse_json_list(raw: str | None) -> list[Any]:
