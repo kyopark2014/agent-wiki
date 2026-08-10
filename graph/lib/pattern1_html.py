@@ -686,6 +686,10 @@ function selectPattern(pattern) {{
   if (window.parent && window.parent !== window) {{
     window.parent.postMessage({{ type: 'graph-pattern', pattern }}, '*');
   }}
+  // If parent fails to reload (network/API hang), unlock buttons again.
+  setTimeout(() => {{
+    document.querySelectorAll('.pattern-btn').forEach(btn => {{ btn.disabled = false; }});
+  }}, 15000);
 }}
 
 document.getElementById('search').addEventListener('input', (ev) => {{

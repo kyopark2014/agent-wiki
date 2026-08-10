@@ -194,9 +194,8 @@ def republish_html_from_json(
             f"({G.number_of_nodes()} nodes / {G.number_of_edges()} edges)"
         ),
     )
-    from lib.embeddings import maybe_build_node_embeddings
-
-    maybe_build_node_embeddings(json_path)
+    # Pattern switch only rewrites HTML — do not rebuild embeddings here
+    # (that blocks PATCH /api/session/settings and hangs the graph UI).
     return html_path
 
 
