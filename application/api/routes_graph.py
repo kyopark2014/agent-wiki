@@ -161,6 +161,7 @@ def query_graph(body: GraphQueryRequest, request: Request) -> dict:
             mode=body.mode,
             budget=body.budget,
             allowed_roots=[graph_root, graph_root / "corpus", graph_root / "out"],
+            use_embeddings=utils.is_hybrid_graph_search_enabled(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

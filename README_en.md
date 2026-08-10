@@ -446,19 +446,24 @@ Convert the AgentAI ppts under /Downloads/Docs/AgenticAI to PDF. Skip if a PDF a
 
 ## Document search
 
-**Document search** in the graph HTML is separate from the top entity-name filter. Flow: question → related-node traversal → **source-file body excerpts** in one panel. No vector DB — only `graph.json` + raw files.
+**Document search** in the graph HTML is separate from the top entity-name filter. Flow: question → related-node traversal → **source-file body excerpts** in one panel. Uses `graph.json` + raw files, with an optional **embedding hybrid** for start nodes (no vector DB — sidecar `out/node_embeddings.json`).
 
 1. **UI** — [ask_panel.py](./graph/lib/ask_panel.py) CSS/HTML/JS is injected into all three pattern HTMLs. **Document search** → enter a question → `POST /api/graph/query` (`credentials: same-origin`).
 2. **API** — [routes_graph.py](./application/api/routes_graph.py) resolves the session user’s `graph.json`, then calls `query_user_graph()` in [graph_query.py](./application/graph_query.py).
-3. **Start-node matching**
+3. **Start-node matching** (lexical ∪ embedding)
    - Tokenize the question (English ≥3 chars, CJK ≥2).
    - Rank candidates by partial **label** match.
    - If labels miss (or to augment), score nodes whose `source_file` **body** contains query terms — e.g. English labels with a Korean query.
+   - **Embeddings**: compare the question to node labels via LiteLLM `titan-embed-v2` (Bedrock Titan Text Embeddings V2, cosine ≥ 0.35) so synonyms like `날씨` ↔ `Weather` can seed traversal without a substring hit. Built on publish/`republish` into `out/node_embeddings.json`; lazy rebuild at query if missing/stale. Falls back to lexical-only when the gateway is unavailable.
 4. **Graph traversal** — default **BFS** (depth 3), optional **DFS** (depth 6). Collect related nodes/edges, rank by relevance, truncate by token `budget`.
 5. **Source excerpts** — read each matched node’s `source_file` only under allowed roots; show paragraphs overlapping query terms, labels, and `source_location`.
 6. **Graph highlight** — raise opacity on result nodes; chip click `focus`es that node.
 
-In-app document search reuses the same BFS/DFS/`budget` ideas as CLI `/graphify query`. Pipeline and LLM settings: [graph/README.md](./graph/README.md).
+**Embedding config:** Document-search Titan embedding hybrid (vector search) runs only when `application/config.json` has **`hybrid_graph_search`: `"enable"`**. Any other value (or missing) → lexical only. Default in this repo is `"enable"`.
+
+Gateway: with `llm_gateway_url` / `llm_gateway_key`, calls LiteLLM `titan-embed-v2`; otherwise Bedrock `amazon.titan-embed-text-v2:0`. Override with `GRAPHIFY_EMBEDDING_MODEL` / `GRAPHIFY_EMBEDDING_DIM`.
+
+In-app document search reuses the same BFS/DFS/`budget` ideas as CLI `/graphify query` (CLI itself stays lexical). Pipeline and LLM settings: [graph/README.md](./graph/README.md).
 
 Document search finds related nodes from start nodes:
 

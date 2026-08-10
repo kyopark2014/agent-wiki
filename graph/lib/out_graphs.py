@@ -102,6 +102,11 @@ def write_user_graph(
             f"({H.number_of_nodes()} nodes / {H.number_of_edges()} edges)"
         ),
     )
+    from lib.embeddings import maybe_build_node_embeddings
+
+    emb = maybe_build_node_embeddings(json_path)
+    if emb is not None:
+        return {"html": html_path, "json": json_path, "embeddings": emb}
     return {"html": html_path, "json": json_path}
 
 
@@ -189,7 +194,11 @@ def republish_html_from_json(
             f"({G.number_of_nodes()} nodes / {G.number_of_edges()} edges)"
         ),
     )
+    from lib.embeddings import maybe_build_node_embeddings
+
+    maybe_build_node_embeddings(json_path)
     return html_path
+
 
 def collect_from_graphify_out(
     src: Path,
@@ -210,4 +219,11 @@ def collect_from_graphify_out(
         if src_file.is_file():
             _atomic_write_bytes(dest, src_file.read_bytes())
             written[name] = dest
+    graph_dest = written.get("graph.json")
+    if graph_dest is not None:
+        from lib.embeddings import maybe_build_node_embeddings
+
+        emb = maybe_build_node_embeddings(graph_dest)
+        if emb is not None:
+            written["node_embeddings.json"] = emb
     return written

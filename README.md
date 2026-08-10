@@ -446,19 +446,61 @@ brew install --cask libreoffice
 
 ## 문서검색
 
-그래프 HTML의 **문서검색**은 상단 엔티티 이름 필터와 별개입니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 한 패널에 보여 줍니다. 벡터 DB 없이 `graph.json` + 원문 파일을 읽습니다.
+그래프 HTML의 **문서검색**은 상단 엔티티 이름 필터와 별개입니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 한 패널에 보여 줍니다. 기본은 `graph.json` + 원문 파일이며, 시작 노드 선정에 **임베딩 hybrid**를 씁니다(벡터 DB 불필요 — `out/node_embeddings.json` 사이드카).
 
 1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. `문서검색` 버튼 → 질문 입력 → `POST /api/graph/query` (`credentials: same-origin`).
 2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
-3. **시작 노드 매칭**
+3. **시작 노드 매칭** (lexical ∪ embedding)
    - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
    - 노드 **label** 부분 일치로 상위 후보 선정.
    - label이 비어도(또는 보강용으로) 노드의 `source_file` **본문**에 질의어가 있으면 점수를 올려 시작 노드로 사용 — 라벨은 영어인데 질의가 한국어인 경우 등.
+   - **임베딩**: LiteLLM `titan-embed-v2`(Bedrock Titan Text Embeddings V2)로 질문·노드 label 벡터를 비교(코사인 ≥ 0.35). `날씨` ↔ `Weather` 같은 유사어를 label 부분일치 없이도 시작 노드로 잡습니다. publish/`republish` 시 `out/node_embeddings.json`을 만들고, 없거나 stale이면 query 때 lazy rebuild. 게이트웨이 미설정·실패 시 lexical만 사용.
 4. **그래프 순회** — 기본 **BFS**(깊이 3), 옵션 **DFS**(깊이 6). 관련 노드·엣지를 모은 뒤 relevance로 정렬하고 token `budget`으로 truncate.
 5. **소스 excerpt** — 매칭 노드의 `source_file`을 허용 루트 안에서만 읽고, 질의어·라벨·`source_location`이 겹치는 문단을 패널에 표시합니다.
 6. **그래프 하이라이트** — 응답 노드 opacity를 올리고, 칩 클릭 시 해당 노드로 `focus`합니다.
 
-CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 재사용합니다. 파이프라인·LLM 설정은 [graph/README.md](./graph/README.md)를 참고하세요.
+**임베딩 설정:** `application/config.json`의 **`hybrid_graph_search`**가 `"enable"`일 때만 문서검색에 Titan 임베딩 hybrid(vector search)를 켭니다. 그 외 값(또는 미설정)이면 lexical만 사용합니다. 현재 기본값은 `"enable"`입니다.
+
+게이트웨이: `llm_gateway_url` / `llm_gateway_key`가 있으면 LiteLLM `titan-embed-v2`, 없으면 Bedrock `amazon.titan-embed-text-v2:0` 직접 호출. env `GRAPHIFY_EMBEDDING_MODEL`(기본 `titan-embed-v2`), `GRAPHIFY_EMBEDDING_DIM`(기본 1024).
+
+### Hybrid 동작 (예: 질문 `"날씨"`)
+
+유사어 목록을 만든 뒤 그 단어들로 **다시 lexical 검색**하는 구조가 **아닙니다**. lexical과 embedding은 둘 다 **시작 노드를 고르는** 단계이고, 그다음 본체는 **그래프 순회**입니다.
+
+```text
+질문 "날씨"
+  ├─ 1. Lexical ──► label/본문에 "날씨" 부분일치 → 시작 노드 (최대 3)
+  ├─ 2. Embedding ► 질문 벡터 ↔ 노드 label 벡터(코사인) → 시작 노드 보강 (합쳐 최대 5)
+  └─ 3. BFS/DFS ─► 시작 노드 이웃 확장 → 4. 소스 excerpt
+```
+
+1. **Lexical (문자 그대로)**  
+   - 토큰 `["날씨"]`로 노드 **label** 부분 문자열 검사 → `Weather API` 같은 label은 여기서 안 잡힘.  
+   - 보강으로 노드 `source_file` **본문**에 `"날씨"`가 있는지도 봄 → corpus에 한글이 있으면 여기서 잡힐 수 있음.
+
+2. **Embedding (의미 유사도)** — 후속 lexical이 아니라 **병렬 보강**  
+   - publish 때 만들어 둔 `node_embeddings.json`(노드 label 벡터)을 로드(없거나 stale이면 lazy rebuild).  
+   - 질문 `"날씨"`만 LiteLLM으로 **한 번** 임베딩.  
+   - 모든 노드 벡터와 코사인 비교(≥ 0.35), top-k를 lexical 결과에 **합침**.  
+   - 동의어 사전·번역으로 `"weather"`를 만든 뒤 label을 다시 치는 단계가 **없음**. `날씨` ↔ `Weather Forecast`처럼 **벡터가 가까운 기존 노드 ID를 직접** 고름.
+
+3. **그래프 순회** — 합친 `start_nodes`에서 BFS(깊이 3) 또는 DFS(깊이 6)로 이웃을 모음. 임베딩/lexical 재검색이 아님.
+
+4. **Excerpt** — 순회로 모인 노드의 원문에서 질의어·label이 겹치는 문단을 표시.
+
+| 단계 | `"날씨"` 예시 |
+|------|----------------|
+| Lexical label | `"날씨"` 없음 → 0건 |
+| Lexical 본문 | corpus에 `날씨` 문장이 있으면 일부 노드 |
+| Embedding | label `Weather…`, `korea_weather` 등이 유사하면 시작 노드에 추가 |
+| BFS/DFS | 그 노드들과 연결된 관련 개념·도구 노드 확장 |
+| Excerpt | 해당 소스 md 문단 표시 |
+
+응답의 `match_via`가 `embed`, `source+embed`, `label+source+embed`처럼 나오면 시작점이 어디서 왔는지 알 수 있습니다.
+
+**한 줄:** 질문 임베딩 → (미리 둔) 노드 label 벡터와 비교 → 시작 노드 보강 → 그래프 순회. 유사어를 만든 다음 lexical을 한 번 더 돌리지 않습니다.
+
+CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 재사용합니다(CLI 자체는 임베딩 없음). 파이프라인·LLM 설정은 [graph/README.md](./graph/README.md)를 참고하세요.
 
 문서 검색을 하면 아래와 같이 시작 노드로부터 관련 노드를 찾습니다.
 

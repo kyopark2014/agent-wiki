@@ -140,6 +140,13 @@ def llm_gateway_settings() -> dict[str, str] | None:
     }
 
 
+def is_hybrid_graph_search_enabled() -> bool:
+    """True when config.json hybrid_graph_search is enable (embedding vector search)."""
+    load_env()
+    raw = str(load_app_config().get("hybrid_graph_search") or "").strip().lower()
+    return raw in {"enable", "enabled", "on", "true", "1", "yes"}
+
+
 def graphify_llm_model() -> str:
     """GRAPHIFY_LLM_MODEL from .env (gateway id or Bedrock-friendly alias)."""
     load_env()

@@ -212,6 +212,13 @@ def is_knowledge_graph_enabled(user_id: str | None) -> bool:
     return bool(load_user_settings(user_id).get("knowledge_graph_enabled", True))
 
 
+def is_hybrid_graph_search_enabled() -> bool:
+    """True when config.json hybrid_graph_search is enable (embedding vector search)."""
+    cfg = load_config() or {}
+    raw = str(cfg.get("hybrid_graph_search") or "").strip().lower()
+    return raw in {"enable", "enabled", "on", "true", "1", "yes"}
+
+
 def get_graph_pattern(user_id: str | None) -> str:
     """Selected Knowledge Graph HTML pattern (pattern1|pattern2|pattern3)."""
     return normalize_graph_pattern(

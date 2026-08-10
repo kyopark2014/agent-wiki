@@ -1,4 +1,8 @@
-"""Graphify-style BFS/DFS query over a user's graph.json + source text excerpts."""
+"""Graphify-style BFS/DFS query over a user's graph.json + source text excerpts.
+
+Start-node selection is hybrid: lexical label/body match plus optional
+LiteLLM embedding similarity (see ``graph_embeddings`` / ``node_embeddings.json``).
+"""
 
 from __future__ import annotations
 
@@ -216,8 +220,21 @@ def query_user_graph(
     mode: str = "bfs",
     budget: int = 2000,
     allowed_roots: list[Path] | None = None,
+    use_embeddings: bool | None = None,
 ) -> dict[str, Any]:
-    """Run graphify-style traversal and attach source text excerpts."""
+    """Run graphify-style traversal and attach source text excerpts.
+
+    When ``use_embeddings`` is None, follows ``hybrid_graph_search`` in
+    application/config.json (``enable`` → embedding hybrid on).
+    """
+    if use_embeddings is None:
+        try:
+            from application import utils as _app_utils
+
+            use_embeddings = _app_utils.is_hybrid_graph_search_enabled()
+        except Exception:  # noqa: BLE001
+            use_embeddings = True
+    use_embeddings = bool(use_embeddings)
     question = (question or "").strip()
     if not question:
         raise ValueError("question is required")
@@ -240,14 +257,17 @@ def query_user_graph(
             scored.append((score, nid))
     scored.sort(reverse=True)
     start_nodes = [nid for _, nid in scored[:3]]
-    match_via = "label"
+    match_parts: list[str] = []
+    if start_nodes:
+        match_parts.append("label")
 
     # Document search: also match corpus/source body text.
     # Needed when labels are English ("Weather…") but the query is Korean ("날씨").
     content_scored = _find_nodes_by_source_content(G, terms, roots)
     if not start_nodes:
         start_nodes = [nid for _, nid in content_scored[:3]]
-        match_via = "source"
+        if start_nodes:
+            match_parts.append("source")
     elif content_scored:
         # Augment starts with strong content matches not already selected.
         chosen = set(start_nodes)
@@ -258,12 +278,47 @@ def query_user_graph(
             chosen.add(nid)
             if len(start_nodes) >= 3:
                 break
-        match_via = "label+source"
+        if "source" not in match_parts:
+            match_parts.append("source")
+
+    # Hybrid: embedding similarity for synonyms (날씨 ↔ Weather). Soft-fails.
+    # Gated by application/config.json hybrid_graph_search=enable.
+    embed_scored: list[tuple[float, str]] = []
+    if use_embeddings:
+        try:
+            from application.graph_embeddings import find_start_nodes_by_embedding
+        except ImportError:
+            try:
+                from graph_embeddings import find_start_nodes_by_embedding  # type: ignore
+            except ImportError:
+                find_start_nodes_by_embedding = None  # type: ignore
+        if find_start_nodes_by_embedding is not None:
+            try:
+                embed_scored = find_start_nodes_by_embedding(question, graph_json)
+            except Exception:  # noqa: BLE001
+                embed_scored = []
+    if embed_scored:
+        chosen = set(start_nodes)
+        for _, nid in embed_scored:
+            if nid not in G:
+                continue
+            if nid in chosen:
+                continue
+            start_nodes.append(nid)
+            chosen.add(nid)
+            if len(start_nodes) >= 5:
+                break
+        start_set = set(start_nodes)
+        if any(nid in start_set for _, nid in embed_scored if nid in G):
+            match_parts.append("embed")
+
+    match_via = "+".join(match_parts) if match_parts else "none"
 
     if not start_nodes:
         return {
             "question": question,
             "mode": mode,
+            "match_via": match_via,
             "start_nodes": [],
             "nodes": [],
             "edges": [],
@@ -272,6 +327,7 @@ def query_user_graph(
         }
 
     content_score_by_id = {nid: score for score, nid in content_scored}
+    embed_score_by_id = {nid: score for score, nid in embed_scored}
 
     subgraph_nodes: set[str] = set()
     subgraph_edges: list[tuple[str, str]] = []
@@ -306,6 +362,7 @@ def query_user_graph(
         return (
             _score_label(str(G.nodes[nid].get("label") or ""), terms) * 10
             + int(content_score_by_id.get(nid, 0))
+            + int(embed_score_by_id.get(nid, 0.0) * 10)
         )
 
     ranked_nodes = sorted(subgraph_nodes, key=relevance, reverse=True)
