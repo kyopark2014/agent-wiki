@@ -1,51 +1,19 @@
-"""Shared Ask panel fragments injected into pattern1/2/3 graph HTML."""
+"""Shared Ask panel fragments injected into pattern1/2/3 graph HTML.
+
+Document search lives inside `.search-panel` as one unified card:
+search box on top, results below when open.
+"""
 
 from __future__ import annotations
 
 ASK_PANEL_CSS = """
-  .ctrl-btn.ask-btn {
-    background: rgba(45, 90, 160, 0.92);
-    border-color: rgba(96, 165, 250, 0.45);
-    font-weight: 650;
-  }
-  .ctrl-btn.ask-btn:hover {
-    background: rgba(59, 110, 190, 0.96);
-    border-color: rgba(147, 197, 253, 0.7);
-  }
-  .ctrl-btn.ask-btn.active {
-    background: #2563eb;
-    border-color: #60a5fa;
-  }
-  #ask-panel {
-    position: absolute;
-    top: 64px;
-    right: 18px;
-    z-index: 6;
-    width: min(420px, calc(100vw - 36px));
-    max-height: calc(100vh - 120px);
-    display: none;
-    flex-direction: column;
-    background: rgba(22, 27, 38, 0.97);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 14px;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.45);
-    overflow: hidden;
-  }
-  #ask-panel.is-open { display: flex; }
-  #ask-panel .ask-header {
+  .search-panel {
+    width: min(315px, calc(100vw - 36px));
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 12px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
+    flex-direction: column;
   }
-  #ask-panel .ask-header h3 {
-    font-size: 14px;
-    font-weight: 650;
-    color: #f3f4f6;
-  }
-  #ask-panel .ask-close {
+  .search-panel .ask-close {
+    display: none;
     background: transparent;
     border: none;
     color: #9aa3b2;
@@ -53,48 +21,40 @@ ASK_PANEL_CSS = """
     line-height: 1;
     cursor: pointer;
     padding: 2px 6px;
+    flex-shrink: 0;
   }
-  #ask-panel .ask-close:hover { color: #fff; }
-  #ask-panel .ask-form {
-    display: flex;
-    gap: 8px;
-    padding: 12px 14px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+  .search-panel .ask-close:hover { color: #fff; }
+  .search-panel.is-ask-open {
+    background: rgba(22, 27, 38, 0.97);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+    overflow: hidden;
+    max-height: calc(100vh - 36px);
   }
-  #ask-panel .ask-form input {
-    flex: 1;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px;
-    color: #e8eaed;
-    padding: 9px 11px;
-    font-size: 13px;
-    outline: none;
-  }
-  #ask-panel .ask-form input:focus {
-    border-color: rgba(96, 165, 250, 0.55);
-  }
-  #ask-panel .ask-form button {
-    background: #3b82f6;
+  .search-panel.is-ask-open .search-box {
+    background: transparent;
     border: none;
-    color: #fff;
-    border-radius: 8px;
-    padding: 9px 14px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    box-shadow: none;
   }
-  #ask-panel .ask-form button:disabled {
-    opacity: 0.55;
-    cursor: wait;
+  .search-panel.is-ask-open .ask-close { display: block; }
+  #ask-panel {
+    display: none;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    overflow: hidden;
   }
+  #ask-panel.is-open { display: flex; }
   #ask-panel .ask-body {
     overflow: auto;
     padding: 12px 14px 16px;
     font-size: 12px;
     line-height: 1.55;
     color: #c4cad4;
+    max-height: calc(100vh - 120px);
   }
   #ask-panel .ask-status {
     color: #9aa3b2;
@@ -168,58 +128,52 @@ ASK_PANEL_CSS = """
 """
 
 ASK_PANEL_HTML = """
-  <div id="ask-panel" aria-hidden="true">
-    <div class="ask-header">
-      <h3>문서검색</h3>
-      <button type="button" class="ask-close" aria-label="닫기" onclick="closeAskPanel()">×</button>
+    <div id="ask-panel" aria-hidden="true" data-doc-search="1">
+      <div class="ask-body" id="ask-body"></div>
     </div>
-    <div class="ask-form">
-      <input id="ask-input" type="search" placeholder="예: 여행, Neo4j, Graph DB" autocomplete="off">
-      <button type="button" id="ask-submit" onclick="submitAsk()">검색</button>
-    </div>
-    <div class="ask-body" id="ask-body">
-      <div class="ask-status">그래프에서 관련 노드를 찾고, 연결된 소스 본문을 보여줍니다.</div>
-    </div>
-  </div>
 """
 
 ASK_PANEL_JS = r"""
 function openAskPanel() {
   const panel = document.getElementById('ask-panel');
+  if (!panel) return;
   panel.classList.add('is-open');
   panel.setAttribute('aria-hidden', 'false');
-  const askBtn = document.querySelector('.ctrl-btn.ask-btn');
-  if (askBtn) askBtn.classList.add('active');
+  const searchPanel = document.querySelector('.search-panel');
+  if (searchPanel) searchPanel.classList.add('is-ask-open');
   const detail = document.getElementById('node-detail');
   if (detail) detail.style.display = 'none';
-  const input = document.getElementById('ask-input');
-  if (input) {
-    input.focus();
-    input.select();
-  }
+  if (typeof toggleLegend === 'function') toggleLegend(true);
 }
 
 function closeAskPanel() {
   const panel = document.getElementById('ask-panel');
+  if (!panel) return;
   panel.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
-  const askBtn = document.querySelector('.ctrl-btn.ask-btn');
-  if (askBtn) askBtn.classList.remove('active');
+  const searchPanel = document.querySelector('.search-panel');
+  if (searchPanel) searchPanel.classList.remove('is-ask-open');
+  const body = document.getElementById('ask-body');
+  if (body) body.innerHTML = '';
 }
 
 function toggleAskPanel() {
   const panel = document.getElementById('ask-panel');
+  if (!panel) return;
   if (panel.classList.contains('is-open')) closeAskPanel();
   else openAskPanel();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('ask-input');
+  const input = document.getElementById('search');
   if (input) {
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') {
         ev.preventDefault();
         submitAsk();
+      } else if (ev.key === 'Escape') {
+        closeAskPanel();
+        input.blur();
       }
     });
   }
@@ -309,15 +263,14 @@ function renderAskResult(data) {
 }
 
 async function submitAsk() {
-  const input = document.getElementById('ask-input');
-  const submit = document.getElementById('ask-submit');
+  const input = document.getElementById('search');
   const body = document.getElementById('ask-body');
   const question = (input && input.value || '').trim();
   if (!question) {
-    body.innerHTML = '<div class="ask-error">검색어를 입력하세요.</div>';
+    closeAskPanel();
     return;
   }
-  submit.disabled = true;
+  openAskPanel();
   body.innerHTML = '<div class="ask-status">문서를 검색하는 중…</div>';
   try {
     const res = await fetch('/api/graph/query', {
@@ -335,8 +288,6 @@ async function submitAsk() {
     renderAskResult(data);
   } catch (err) {
     body.innerHTML = `<div class="ask-error">${escapeHtml(err && err.message ? err.message : String(err))}</div>`;
-  } finally {
-    submit.disabled = false;
   }
 }
 """

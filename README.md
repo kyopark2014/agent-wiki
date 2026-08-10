@@ -305,7 +305,7 @@ Sidebar "Agent wiki (user)" 클릭
 | **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | Neo4j Explore/Bloom 스타일. 어두운 캔버스, 작은 `dot` 노드, 얇은 회색 연속 곡선 엣지, 허브 위주 라벨. physics는 `barnesHut`. |
 | **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | Neo4j Browser식 전체 overview. 로드 직후 `fit`. `ellipse` 라벨 노드 + 관계명(대문자) 엣지. `forceAtlas2Based`. |
 
-공통 UI: 그룹(커뮤니티) 범례 필터, 엔티티 텍스트 검색(라벨 필터), 노드 클릭 상세(출처·관계), 패턴 전환 버튼, **문서검색** 패널.
+공통 UI: 그룹(커뮤니티) 범례 필터, 좌상단 **문서검색**(Enter로 쿼리, 검색창·결과가 하나의 카드), 노드 클릭 상세(출처·관계), 패턴 전환 버튼.
 
 ```text
 graph.json (+ communities)
@@ -446,9 +446,9 @@ brew install --cask libreoffice
 
 ## 문서검색
 
-그래프 HTML의 **문서검색**은 상단 엔티티 이름 필터와 별개입니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 한 패널에 보여 줍니다. 기본은 `graph.json` + 원문 파일이며, 시작 노드 선정에 **임베딩 hybrid**를 씁니다(벡터 DB 불필요 — `out/node_embeddings.json` 사이드카).
+그래프 HTML의 **문서검색**은 좌상단 `Search entities...` 입력에서 Enter로 실행됩니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 같은 카드에 보여 줍니다. 기본은 `graph.json` + 원문 파일이며, 시작 노드 선정에 **임베딩 hybrid**를 씁니다(벡터 DB 불필요 — `out/node_embeddings.json` 사이드카).
 
-1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. `문서검색` 버튼 → 질문 입력 → `POST /api/graph/query` (`credentials: same-origin`).
+1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. 좌상단 검색 Enter → `POST /api/graph/query` (`credentials: same-origin`). 검색 시 범례는 자동으로 숨겨집니다.
 2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
 3. **시작 노드 매칭** (lexical ∪ embedding)
    - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
