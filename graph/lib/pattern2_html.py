@@ -426,6 +426,12 @@ def _render_template(payload: dict[str, Any]) -> str:
     color: #fff;
     font-weight: 650;
   }}
+  .ctrl-btn.pattern-btn.active {{
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: #fff;
+    font-weight: 650;
+  }}
   .ctrl-btn:disabled {{ opacity: 0.55; cursor: wait; }}
 <<<ASK_PANEL_CSS>>>
 </style>
