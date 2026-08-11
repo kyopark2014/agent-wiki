@@ -2020,6 +2020,7 @@ async def create_agent(
     # mcp_config registers the retrieve server as "kb_retriever"
     for server_name in (
         "memory",
+        "graph_search",
         "kb_retriever",
         "kb-retriever",
         "imageGeneration",
@@ -2134,6 +2135,14 @@ def run_agent(
     mcp_servers = [str(s).strip() for s in (mcp_servers or []) if str(s).strip()]
     if memory_enabled and "memory" not in mcp_servers:
         mcp_servers = mcp_servers + ["memory"]
+    # Auto-attach graph search when Knowledge Graph is on (same path as UI doc search).
+    if (
+        utils.is_knowledge_graph_enabled(user_id)
+        and "graph_search" not in mcp_servers
+        and "graph search" not in mcp_servers
+        and "knowledge graph" not in mcp_servers
+    ):
+        mcp_servers = mcp_servers + ["graph_search"]
 
     # Must not use asyncio.run(): AsyncSqliteSaver locks are loop-bound.
     return _run_on_agent_loop(

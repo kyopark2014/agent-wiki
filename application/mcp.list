@@ -9,6 +9,7 @@ image generation
 text_extraction
 filesystem
 memory
+graph_search
 slack
 notion
 gog
