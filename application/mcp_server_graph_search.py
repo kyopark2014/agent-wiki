@@ -20,7 +20,7 @@ logger = logging.getLogger("graph-search")
 
 try:
     mcp = FastMCP(
-        name="graph_search",
+        name="graph memory",
         instructions=(
             "Search the user's Knowledge Graph (past conversation history) "
             "with the same document-search path as the graph UI. "
@@ -38,7 +38,7 @@ except Exception as e:
 # knowledge graph search
 ######################################
 @mcp.tool()
-def search_graph(
+def recall_graph_memory(
     question: str,
     mode: Optional[Literal["bfs", "dfs"]] = "bfs",
     budget: Optional[int] = 2000,
@@ -48,8 +48,8 @@ def search_graph(
 
     Same behavior as the graph screen document search (POST /api/graph/query):
     finds matching nodes (label / source text / optional embedding hybrid),
-    traverses neighbors (BFS or DFS), and returns related nodes, edges, and
-    source-text excerpts from prior chats.
+    traverses neighbors (BFS or DFS), and returns source-text excerpts from
+    prior chats (topic/relation metadata is omitted).
 
     Call this when the user asks about something they discussed before, or when
     personal/historical context may live in the knowledge graph rather than
@@ -64,17 +64,15 @@ def search_graph(
         On success (same shape as memory retrieve):
             {"text": [
                 {"type": "excerpt", "source": "...", "related_topics": [...], "text": "..."},
-                {"type": "topic", "label": "...", "source": "..."},
-                {"type": "relation", "from": "...", "relation": "...", "to": "..."},
                 ...
             ]}
         On error:
             {"status": "error", "content": [{"text": "..."}]}
     """
-    logger.info("###### search_graph ######")
+    logger.info("###### recall_graph_memory ######")
     logger.info(f"question: {question}, mode: {mode}, budget: {budget}")
 
-    return mcp_graph_search.search_graph(question, mode=mode, budget=budget)
+    return mcp_graph_search.recall_graph_memory(question, mode=mode, budget=budget)
 
 
 if __name__ == "__main__":

@@ -266,10 +266,10 @@ def load_config(mcp_type):
             }
         }
 
-    elif mcp_type in ("graph_search", "graph search", "knowledge graph"):
+    elif mcp_type in ("graph memory", "mcp_graph_memory", "graph_search", "graph search", "knowledge graph"):
         return {
             "mcpServers": {
-                "graph_search": {
+                "graph memory": {
                     "command": "python",
                     "args": [f"{workingDir}/mcp_server_graph_search.py"],
                     "env": {

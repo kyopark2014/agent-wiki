@@ -30,8 +30,6 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 _MAX_EXCERPTS = 12
-_MAX_RELATIONS = 20
-_MAX_TOPICS = 16
 
 
 def _current_user_id() -> str:
@@ -45,12 +43,11 @@ def _error(message: str) -> Dict[str, Any]:
 
 def _extract_contents(result: dict[str, Any]) -> List[Any]:
     """
-    Flatten graph query output into LLM-ready content items.
+    Flatten graph query output into LLM-ready excerpt items.
 
-    Priority (most useful for answering first):
-      1. Source excerpts from past conversation turns
-      2. Related topics / entity labels
-      3. Key relations between entities
+    Topic labels and relations are omitted: they add tokens without
+    citable source text. Related entity names stay on each excerpt as
+    ``related_topics``.
     """
     contents: List[Any] = []
 
@@ -59,7 +56,6 @@ def _extract_contents(result: dict[str, Any]) -> List[Any]:
         logger.info("graph search empty: %s", result.get("message"))
         return contents
 
-    # 1) Past-conversation excerpts (primary evidence)
     excerpt_count = 0
     for source in result.get("sources") or []:
         if not source.get("readable", True):
@@ -84,54 +80,11 @@ def _extract_contents(result: dict[str, Any]) -> List[Any]:
         if excerpt_count >= _MAX_EXCERPTS:
             break
 
-    # 2) Related topics / entities from the subgraph
-    topic_seen: set[str] = set()
-    for n in result.get("nodes") or []:
-        label = str(n.get("label") or "").strip()
-        if not label or label in topic_seen:
-            continue
-        topic_seen.add(label)
-        src_name = Path(str(n.get("source_file") or "")).name or None
-        item = {"type": "topic", "label": label}
-        if src_name:
-            item["source"] = src_name
-        contents.append(item)
-        if len(topic_seen) >= _MAX_TOPICS:
-            break
-
-    # 3) Key relations as short facts
-    relation_count = 0
-    seen_rel: set[str] = set()
-    for e in result.get("edges") or []:
-        frm = str(e.get("source_label") or e.get("source") or "").strip()
-        to = str(e.get("target_label") or e.get("target") or "").strip()
-        rel = str(e.get("relation") or "").strip() or "related_to"
-        if not frm or not to:
-            continue
-        key = f"{frm}|{rel}|{to}"
-        if key in seen_rel:
-            continue
-        seen_rel.add(key)
-        fact = {"type": "relation", "from": frm, "relation": rel, "to": to}
-        conf = e.get("confidence")
-        if conf not in (None, "", "None"):
-            fact["confidence"] = conf
-        contents.append(fact)
-        relation_count += 1
-        if relation_count >= _MAX_RELATIONS:
-            break
-
-    logger.info(
-        "extracted contents: excerpts=%s topics=%s relations=%s total=%s",
-        excerpt_count,
-        len(topic_seen),
-        relation_count,
-        len(contents),
-    )
+    logger.info("extracted contents: excerpts=%s", excerpt_count)
     return contents
 
 
-def search_graph(
+def recall_graph_memory(
     question: str,
     mode: Optional[Literal["bfs", "dfs"]] = "bfs",
     budget: Optional[int] = 2000,
@@ -155,7 +108,7 @@ def search_graph(
         logger.info("AGENTCORE_USER_ID was empty, using default: %s", user_id)
 
     logger.info(
-        "###### search_graph ###### user_id=%s question=%r mode=%s budget=%s",
+        "###### recall_graph_memory ###### user_id=%s question=%r mode=%s budget=%s",
         user_id,
         question,
         mode,

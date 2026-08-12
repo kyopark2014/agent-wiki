@@ -244,7 +244,7 @@ SKILL_SYSTEM_PROMPT = (
     "상황에 맞는 구체적인 세부 정보를 충분히 제공합니다.\n"
     "모르는 질문을 받으면 솔직히 모른다고 말합니다.\n"
     "한국어로 답변하세요.\n"
-    "Memory를 답변에 적극 활용하세요.\n\n"
+    "답변 전에 반드시 recall_memory(action=\"retrieve\", query=<사용자 질문>)를 1회 이상 호출하세요.\n\n"
     "## Agent Workflow\n"
     "1. 사용자 입력을 받는다\n"
     "2. 요청에 맞는 skill이 있으면 get_skill_instructions 도구로 상세 지침을 로드한다\n"

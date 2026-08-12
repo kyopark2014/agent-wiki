@@ -310,6 +310,13 @@ def create_strategy_if_not_exists(memory_id: str):
 
 def create_memory():
     """Create project Memory with shared UserPreference + Summary + Semantic strategies."""
+    if not agentcore_memory_role:
+        raise ValueError(
+            "agentcore_memory_role is missing from config.json. "
+            "Custom memory strategies require memoryExecutionRoleArn. "
+            "Run installer create_agentcore_memory_role / create_agentcore_memory "
+            "and set agentcore_memory_role + memory_id in application/config.json."
+        )
     result = memory_client.create_memory_and_wait(
         name=projectName.replace("-", "_"),
         description=f"Memory for {projectName}",
