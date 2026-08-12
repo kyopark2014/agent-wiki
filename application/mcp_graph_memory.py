@@ -1,5 +1,5 @@
 """
-Knowledge Graph search tool for MCP.
+Knowledge Graph memory tool for MCP.
 
 Wraps application.graph_query.query_user_graph — the same BFS/DFS + excerpt
 path used by POST /api/graph/query (graph UI document search) — so the agent
@@ -23,7 +23,7 @@ logging.basicConfig(
     format="%(filename)s:%(lineno)d | %(message)s",
     handlers=[logging.StreamHandler(sys.stderr)],
 )
-logger = logging.getLogger("graph-search")
+logger = logging.getLogger("graph-memory")
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 if _script_dir not in sys.path:
@@ -53,7 +53,7 @@ def _extract_contents(result: dict[str, Any]) -> List[Any]:
 
     if result.get("message") and not result.get("nodes") and not result.get("sources"):
         # No matches — keep empty list like memory retrieve with no hits
-        logger.info("graph search empty: %s", result.get("message"))
+        logger.info("graph memory empty: %s", result.get("message"))
         return contents
 
     excerpt_count = 0
@@ -100,7 +100,7 @@ def recall_graph_memory(
         from graph_query import query_user_graph
     except ImportError as e:
         logger.error(f"Failed to import graph modules: {e}")
-        return _error(f"Graph search unavailable: {e}")
+        return _error(f"Graph memory unavailable: {e}")
 
     user_id = _current_user_id()
     if not user_id:
@@ -146,7 +146,7 @@ def recall_graph_memory(
     except FileNotFoundError as e:
         return _error(str(e))
     except Exception as e:  # noqa: BLE001
-        logger.exception("graph search failed")
+        logger.exception("graph memory failed")
         return _error(f"query failed: {e}")
 
     contents = _extract_contents(result)

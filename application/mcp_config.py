@@ -271,7 +271,7 @@ def load_config(mcp_type):
             "mcpServers": {
                 "graph memory": {
                     "command": "python",
-                    "args": [f"{workingDir}/mcp_server_graph_search.py"],
+                    "args": [f"{workingDir}/mcp_server_graph_memory.py"],
                     "env": {
                         "PYTHONPATH": workingDir,
                         # AGENTCORE_USER_ID is injected at runtime in chat.create_agent()

@@ -6,7 +6,7 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
-import mcp_graph_search
+import mcp_graph_memory
 
 from typing import Dict, Literal, Optional
 from mcp.server.fastmcp import FastMCP
@@ -16,7 +16,7 @@ logging.basicConfig(
     format="%(filename)s:%(lineno)d | %(message)s",
     handlers=[logging.StreamHandler(sys.stderr)],
 )
-logger = logging.getLogger("graph-search")
+logger = logging.getLogger("graph-memory")
 
 try:
     mcp = FastMCP(
@@ -35,7 +35,7 @@ except Exception as e:
 
 
 ######################################
-# knowledge graph search
+# knowledge graph memory
 ######################################
 @mcp.tool()
 def recall_graph_memory(
@@ -72,7 +72,7 @@ def recall_graph_memory(
     logger.info("###### recall_graph_memory ######")
     logger.info(f"question: {question}, mode: {mode}, budget: {budget}")
 
-    return mcp_graph_search.recall_graph_memory(question, mode=mode, budget=budget)
+    return mcp_graph_memory.recall_graph_memory(question, mode=mode, budget=budget)
 
 
 if __name__ == "__main__":
