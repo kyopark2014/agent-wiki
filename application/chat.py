@@ -2137,8 +2137,6 @@ def run_agent(
     human_message = build_human_message_with_files(prompt or "", files)
 
     mcp_servers = [str(s).strip() for s in (mcp_servers or []) if str(s).strip()]
-    if memory_enabled and "memory" not in mcp_servers:
-        mcp_servers = mcp_servers + ["memory"]
     # Auto-attach graph memory when Knowledge Graph is on (same path as UI doc search).
     if (
         utils.is_knowledge_graph_enabled(user_id)
