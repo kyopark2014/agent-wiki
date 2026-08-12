@@ -216,6 +216,11 @@ def list_memory_records(
         params["nextToken"] = next_token
     return bedrock_agent_core_client.list_memory_records(**params)
 
+def _looks_like_json(text: str) -> bool:
+    stripped = text.lstrip()
+    return bool(stripped) and stripped[0] in "{["
+
+
 def _extract_contents_from_response(response: Dict) -> List:
     contents = []
     if not isinstance(response, dict):
@@ -224,15 +229,22 @@ def _extract_contents_from_response(response: Dict) -> List:
     summaries = response.get("memoryRecordSummaries") or []
     for memory_record_summary in summaries:
         try:
-            json_content = memory_record_summary["content"]["text"]
-            content = json.loads(json_content)
-            logger.info(f"content: {content}")
-            contents.append(content)
-        except (KeyError, TypeError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to parse memory record content: {e}")
-            text = memory_record_summary.get("content", {}).get("text")
-            if text:
-                contents.append(text)
+            text = memory_record_summary["content"]["text"]
+        except (KeyError, TypeError):
+            continue
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        if _looks_like_json(text):
+            try:
+                content = json.loads(text)
+                logger.info(f"content: {content}")
+                contents.append(content)
+                continue
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse memory record content as JSON: {e}")
+
+        contents.append(text)
     return contents
 
 def recall_memory(
