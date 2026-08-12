@@ -266,7 +266,7 @@ def load_config(mcp_type):
             }
         }
 
-    elif mcp_type in ("graph memory", "mcp_graph_memory", "graph_search", "graph search", "knowledge graph"):
+    elif mcp_type == "graph memory":
         return {
             "mcpServers": {
                 "graph memory": {

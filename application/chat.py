@@ -2025,8 +2025,6 @@ async def create_agent(
     for server_name in (
         "memory",
         "graph memory",
-        "mcp_graph_memory",
-        "graph_search",
         "kb_retriever",
         "kb-retriever",
         "imageGeneration",
@@ -2145,10 +2143,6 @@ def run_agent(
     if (
         utils.is_knowledge_graph_enabled(user_id)
         and "graph memory" not in mcp_servers
-        and "mcp_graph_memory" not in mcp_servers
-        and "graph_search" not in mcp_servers
-        and "graph search" not in mcp_servers
-        and "knowledge graph" not in mcp_servers
     ):
         mcp_servers = mcp_servers + ["graph memory"]
 
