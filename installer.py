@@ -122,9 +122,10 @@ def create_s3_bucket() -> str:
             VersioningConfiguration={"Status": "Suspended"}
         )
         
-        # Create docs and artifacts folders
-        logger.debug("Creating docs and artifacts folders")
-        for folder in ["docs/", "artifacts/"]:
+        # Create docs/{project_name}/ and artifacts/ folders
+        docs_prefix = f"docs/{project_name}/"
+        logger.debug("Creating %s and artifacts/ folders", docs_prefix)
+        for folder in [docs_prefix, "artifacts/"]:
             try:
                 s3_client.put_object(
                     Bucket=bucket_name,
@@ -141,9 +142,10 @@ def create_s3_bucket() -> str:
     except ClientError as e:
         if e.response["Error"]["Code"] in ["BucketAlreadyExists", "BucketAlreadyOwnedByYou"]:
             logger.warning(f"S3 bucket already exists: {bucket_name}")
-            # Create docs and artifacts folders if bucket already exists
-            logger.debug("Creating docs and artifacts folders in existing bucket")
-            for folder in ["docs/", "artifacts/"]:
+            # Create docs/{project_name}/ and artifacts/ folders if bucket already exists
+            docs_prefix = f"docs/{project_name}/"
+            logger.debug("Creating %s and artifacts/ folders in existing bucket", docs_prefix)
+            for folder in [docs_prefix, "artifacts/"]:
                 try:
                     s3_client.put_object(
                         Bucket=bucket_name,
@@ -2781,7 +2783,7 @@ def create_knowledge_base_with_opensearch(opensearch_info: Dict[str, str], knowl
     
     bedrock_agent_client = boto3.client("bedrock-agent", region_name=region)
     # parsing_model_arn = f"arn:aws:bedrock:{region}:{account_id}:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    parsing_model_arn = f"arn:aws:bedrock:{region}:{account_id}:inference-profile/global.anthropic.claude-sonnet-4-20250514-v1:0"
+    parsing_model_arn = f"arn:aws:bedrock:{region}:{account_id}:inference-profile/global.anthropic.claude-sonnet-4-6"
     
     # Check if Knowledge Base already exists
     try:
@@ -2904,7 +2906,7 @@ def create_knowledge_base_with_opensearch(opensearch_info: Dict[str, str], knowl
             "type": "S3",
             "s3Configuration": {
                 "bucketArn": f"arn:aws:s3:::{s3_bucket_name}",
-                "inclusionPrefixes": ["docs/"]
+                "inclusionPrefixes": [f"docs/{project_name}/"]
             }
         },
         vectorIngestionConfiguration={

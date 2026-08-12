@@ -32,7 +32,16 @@ projectName = config.get('projectName')
 knowledge_base_id = config.get('knowledge_base_id')
 number_of_results = 5
 
-doc_prefix = "docs/"
+
+def docs_prefix(cfg=None) -> str:
+    cfg = cfg if cfg is not None else config
+    project_name = cfg.get("projectName") or cfg.get("knowledge_base_name")
+    if project_name:
+        return f"docs/{project_name}/"
+    return "docs/"
+
+
+doc_prefix = docs_prefix(config)
 path = config.get('sharing_url', '')
 
 aws_access_key = config.get('aws', {}).get('access_key_id')
@@ -111,7 +120,7 @@ def retrieve(query):
             logger.info("Attempting to update knowledge_base_id...")
             
             bedrock_region = config.get('region', 'us-west-2')
-            projectName = config.get('projectName')
+            projectName = config.get('projectName') or config.get('knowledge_base_name')
 
             bedrock_agent_client = boto3.client("bedrock-agent", region_name=bedrock_region)
             knowledge_base_list = bedrock_agent_client.list_knowledge_bases()
@@ -168,8 +177,12 @@ def retrieve(query):
                 uri = location["s3Location"]["uri"] if location["s3Location"]["uri"] is not None else ""
                 
                 name = uri.split("/")[-1]
-                encoded_name = parse.quote(name)                
-                url = f"{path}/{doc_prefix}{encoded_name}"
+                encoded_name = parse.quote(name)
+                if "/docs/" in uri:
+                    relative = uri.split("/docs/", 1)[1]
+                    url = f"{path}/docs/{parse.quote(relative, safe='/')}"
+                else:
+                    url = f"{path}/{doc_prefix}{encoded_name}"
                 
             elif "webLocation" in location:
                 url = location["webLocation"]["url"] if location["webLocation"]["url"] is not None else ""

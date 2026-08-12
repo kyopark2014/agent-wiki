@@ -116,8 +116,8 @@ def ingest_rag_upload(
 ) -> dict[str, Any]:
     """Upload ``file_bytes`` to S3 under the user's folder and start a KB sync.
 
-    Objects are stored at ``docs/{user_id}/{file_name}`` with a sidecar
-    ``{file_name}.metadata.json`` for Knowledge Base metadata filtering.
+    Objects are stored at ``docs/{projectName}/{user_id}/{file_name}`` with a
+    sidecar ``{file_name}.metadata.json`` for Knowledge Base metadata filtering.
 
     Raises:
         RagServiceError: when sync status cannot be checked, an ingest is

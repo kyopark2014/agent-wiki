@@ -144,6 +144,7 @@ def main():
     region = config['region']
     s3_bucket = config['s3_bucket']
     knowledge_base_id = config['knowledge_base_id']
+    project_name = config.get('projectName', 'agent-wiki')
     
     # Initialize AWS clients
     s3_client = boto3.client('s3', region_name=region)
@@ -151,7 +152,7 @@ def main():
     
     # File to upload
     local_file = "contents/error_code.pdf"
-    s3_key = "docs/error_code.pdf"
+    s3_key = f"docs/{project_name}/error_code.pdf"
     
     # Check if file exists locally
     if not os.path.exists(local_file):

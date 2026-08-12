@@ -72,11 +72,11 @@ bedrock_region = config.get("region", "ap-northeast-2")
 accountId = config.get("accountId")
 knowledge_base_name = config.get("knowledge_base_name")
 s3_bucket = config.get("s3_bucket")
-s3_prefix = "docs"
+s3_prefix = utils.docs_s3_prefix()
 s3_image_prefix = "images"
 
 path = config.get('sharing_url', '')
-doc_prefix = "docs/"
+doc_prefix = f"{s3_prefix}/"
 
 model_name = "Claude 5.0 Sonnet"
 model_type = "claude"
@@ -1509,7 +1509,11 @@ def retrieve(query):
                 name = uri.split("/")[-1]
                 encoded_name = parse.quote(name)
                 if path:
-                    url = f"{path}/{doc_prefix}{encoded_name}"
+                    if "/docs/" in uri:
+                        relative = uri.split("/docs/", 1)[1]
+                        url = f"{path}/docs/{parse.quote(relative, safe='/')}"
+                    else:
+                        url = f"{path}/{doc_prefix}{encoded_name}"
                 else:
                     url = s3_uri_to_console_url(uri, bedrock_region)
                 
@@ -1672,7 +1676,7 @@ def _format_artifact_links_markdown(artifact_urls: list) -> str:
                 rel = name
             lines.append(f"- `{rel}`")
     return "\n".join(lines) + "\n"
-s3_prefix = "docs"
+s3_prefix = utils.docs_s3_prefix()
 capture_prefix = "captures"
 
 def _sanitize_reference_text(text: str, max_len: int) -> str:

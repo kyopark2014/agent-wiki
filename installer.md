@@ -54,7 +54,7 @@ custom_header_value = f"{project_name}_12dab15e4s31"
 - **설정**: 
   - CORS 활성화 (GET, POST, PUT)
   - 퍼블릭 액세스 차단
-  - `docs/`, `artifacts/` 폴더 자동 생성
+  - `docs/{project_name}/`, `artifacts/` 폴더 자동 생성
 
 ### 2. IAM 역할
 
@@ -73,9 +73,9 @@ custom_header_value = f"{project_name}_12dab15e4s31"
 - `telegramapikey-{project_name}`: Telegram Bot API 키
 
 ### 4. OpenSearch Serverless
-- **컬렉션**: Vector 검색용 서버리스 컬렉션
-- **정책**: 암호화, 네트워크, 데이터 액세스 정책
-- **인덱스**: KNN 벡터 검색 인덱스 (1024차원)
+- **컬렉션 이름**: `{project_name}` (프로젝트 전용)
+- **정책**: `enc-{project_name}-{region}`, `net-{project_name}-{region}`, `data-{project_name}`
+- **인덱스**: KNN 벡터 검색 인덱스 (1024차원, 이름=`{project_name}`)
 
 ### 5. VPC 네트워킹
 
@@ -112,10 +112,12 @@ VPC (10.20.0.0/16)
 - **배포 위치**: Private Subnet
 
 ### 9. Bedrock Knowledge Base
+- **이름**: `{project_name}` (프로젝트 전용)
 - **스토리지**: OpenSearch Serverless
 - **임베딩 모델**: Amazon Titan Embed Text v2 (1024차원)
-- **파싱 모델**: Claude Sonnet
+- **파싱 모델**: Claude Sonnet 4.6 (Foundation Model Parser)
 - **청킹**: Hierarchical (1500/300 토큰)
+- **데이터 소스**: S3 `docs/{project_name}/` 접두사
 
 ---
 
@@ -132,7 +134,7 @@ def create_s3_bucket() -> str:
     # 버킷 생성
     # CORS 설정 (GET, POST, PUT 허용)
     # 퍼블릭 액세스 차단
-    # docs/, artifacts/ 폴더 생성
+    # docs/{project_name}/, artifacts/ 폴더 생성
     return bucket_name
 ```
 

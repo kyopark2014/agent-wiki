@@ -744,7 +744,9 @@ def update_rag_info():
         )
         logger.info(f"(list_knowledge_bases) response: {response}")
         
-        knowledge_base_name = config.get("knowledge_base_name", "rag-project")
+        knowledge_base_name = config.get("knowledge_base_name") or config.get(
+            "projectName", projectName
+        )
         if "knowledgeBaseSummaries" in response:
             summaries = response["knowledgeBaseSummaries"]
             for summary in summaries:
@@ -937,15 +939,23 @@ def _sanitize_s3_user_segment(user_id: str | None) -> str | None:
     return sanitize_user_path_segment(user_id)
 
 
+def docs_s3_prefix(project: str | None = None) -> str:
+    """Return S3 key prefix for RAG docs: ``docs/{projectName}``."""
+    name = (project or projectName or "").strip().strip("/")
+    if not name:
+        name = "default"
+    return f"docs/{name}"
+
+
 def upload_to_s3(
     file_bytes: bytes,
     file_name: str,
     user_id: str | None = None,
 ) -> dict | None:
-    """Upload a file to S3 under docs/ (or images/) and return upload metadata.
+    """Upload a file to S3 under docs/{projectName}/ (or images/) and return metadata.
 
     When ``user_id`` is provided, the object key becomes
-    ``{prefix}/{user_id}/{file_name}`` so each user has a separate folder.
+    ``docs/{projectName}/{user_id}/{file_name}`` so each user has a separate folder.
     """
     if not s3_bucket:
         logger.error("s3_bucket is not configured")
@@ -956,7 +966,11 @@ def upload_to_s3(
         content_type = get_contents_type(file_name)
         logger.info("content_type: %s", content_type)
 
-        prefix = "images" if content_type.startswith("image/") else "docs"
+        prefix = (
+            "images"
+            if isinstance(content_type, str) and content_type.startswith("image/")
+            else docs_s3_prefix()
+        )
         user_segment = _sanitize_s3_user_segment(user_id)
         if user_segment:
             s3_key = f"{prefix}/{user_segment}/{file_name}"
@@ -972,7 +986,7 @@ def upload_to_s3(
             "Metadata": user_meta,
             "Body": file_bytes,
         }
-        if content_type != "no info":
+        if content_type and content_type != "no info":
             put_params["ContentType"] = content_type
         if content_type == "application/pdf":
             put_params["ContentDisposition"] = "inline"
