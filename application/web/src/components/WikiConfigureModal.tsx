@@ -32,6 +32,7 @@ export function WikiConfigureModal({ onClose }: Props) {
   const [sourceSlots, setSourceSlots] = useState<string[]>(emptySlots());
   const [urlInput, setUrlInput] = useState("");
   const [urlHistory, setUrlHistory] = useState<string[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<File[]>([]);
   const [wikiDir, setWikiDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -40,6 +41,7 @@ export function WikiConfigureModal({ onClose }: Props) {
   const [success, setSuccess] = useState<string | null>(null);
   const [menuIndex, setMenuIndex] = useState<number | null>(null);
   const sourceBtnRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,25 +81,66 @@ export function WikiConfigureModal({ onClose }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [busy, addingUrl, menuIndex, onClose]);
 
-  async function handleSaveSources() {
+  async function handleSave() {
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
+      const messages: string[] = [];
+
+      if (pendingDocs.length > 0) {
+        const result = await api.uploadWikiRawFiles(pendingDocs);
+        setPendingDocs([]);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        const names = (result.saved || []).map((s) => s.name).join(", ");
+        messages.push(
+          `문서 ${result.count}개를 raw에 저장` +
+            (names ? ` (${names})` : ""),
+        );
+      }
+
       const folders = sourceSlots.map((s) => s.trim()).filter(Boolean);
       const saved = await api.putWikiSources({ folders });
       setSourceSlots(emptySlots(saved.folders || [], saved.max_sources || SOURCE_SLOTS));
       setUrlHistory(saved.urls || []);
+      if (saved.folders.length > 0) {
+        messages.push(`Source ${saved.folders.length}개 저장`);
+      } else {
+        messages.push("Sources 비움 (Sync 시 raw 포함)");
+      }
+
       setSuccess(
-        saved.folders.length > 0
-          ? `Source ${saved.folders.length}개를 저장했습니다. Sync 시 해당 폴더를 추출합니다.`
-          : "Sources를 비웠습니다. Sync 시 raw(또는 Wiki 루트)를 사용합니다.",
+        messages.join(". ") + ". Sync를 실행하면 그래프에 반영됩니다.",
       );
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function handlePickDocuments(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const incoming = Array.from(fileList);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    setPendingDocs((prev) => {
+      const byKey = new Map<string, File>();
+      for (const f of prev) {
+        byKey.set(`${f.name}:${f.size}:${f.lastModified}`, f);
+      }
+      for (const f of incoming) {
+        byKey.set(`${f.name}:${f.size}:${f.lastModified}`, f);
+      }
+      return Array.from(byKey.values());
+    });
+    setError(null);
+    setSuccess(null);
+  }
+
+  function removePendingDoc(index: number) {
+    setPendingDocs((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleAddUrl() {
@@ -145,7 +188,12 @@ export function WikiConfigureModal({ onClose }: Props) {
       aria-modal="true"
       aria-labelledby="wiki-configure-title"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy && !addingUrl && menuIndex === null) {
+        if (
+          e.target === e.currentTarget &&
+          !busy &&
+          !addingUrl &&
+          menuIndex === null
+        ) {
           onClose();
         }
       }}
@@ -153,18 +201,69 @@ export function WikiConfigureModal({ onClose }: Props) {
       <div className="modal wiki-configure-modal">
         <h2 id="wiki-configure-title">Wiki Configure</h2>
         <p className="wiki-configure-help">
-          Sync Source는 최대 {SOURCE_SLOTS}개까지 지정할 수 있습니다. Source를
-          선택하면 폴더 메뉴가 열립니다. URL은 입력 즉시{" "}
+          Sync Source는 최대 {SOURCE_SLOTS}개까지 지정할 수 있습니다.{" "}
+          <strong>문서 추가</strong>로 고른 파일은 <strong>저장</strong> 시{" "}
           <code>{wikiDir || ".session_storage/{user}/wiki"}/raw</code>에
-          저장되고, 이력·Sources는{" "}
-          <code>{wikiDir || ".session_storage/{user}/wiki"}/wiki_sources.json</code>
-          에 쌓입니다. Sources를 비우면{" "}
-          <code>{wikiDir || "wiki"}/raw</code>(없으면 Wiki 루트)를 Sync합니다.
+          복사됩니다. Sync는 Sources와 raw를 함께 추출합니다. URL은 입력 즉시
+          raw에 저장됩니다.
         </p>
         {loading ? (
           <p className="llm-gateway-muted">불러오는 중…</p>
         ) : (
           <>
+            <div className="wiki-configure-section-label">문서 추가</div>
+            <div className="wiki-configure-docs">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="wiki-configure-file-input"
+                accept=".pdf,.md,.txt,.markdown,.rst,.docx,.pptx,.csv,.json,.html,.htm,application/pdf,text/plain,text/markdown"
+                disabled={busy || addingUrl}
+                onChange={(e) => {
+                  handlePickDocuments(e.target.files);
+                }}
+              />
+              <div className="wiki-configure-docs-actions">
+                <button
+                  type="button"
+                  className="modal-btn-secondary"
+                  disabled={busy || addingUrl}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  파일 선택…
+                </button>
+              </div>
+              {pendingDocs.length > 0 ? (
+                <ul className="wiki-configure-docs-list">
+                  {pendingDocs.map((file, index) => (
+                    <li key={`${file.name}-${file.size}-${file.lastModified}`}>
+                      <span className="wiki-configure-docs-name">
+                        {file.name}
+                      </span>
+                      <span className="wiki-configure-docs-meta">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </span>
+                      <button
+                        type="button"
+                        className="wiki-configure-docs-remove"
+                        disabled={busy}
+                        aria-label={`${file.name} 제거`}
+                        onClick={() => removePendingDoc(index)}
+                      >
+                        제거
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="wiki-configure-docs-empty">
+                  파일을 선택한 뒤 하단 <strong>저장</strong>을 누르면
+                  wiki/raw로 복사됩니다. 이후 Sync로 그래프에 반영하세요.
+                </p>
+              )}
+            </div>
+
             <div className="wiki-configure-section-label">Sources</div>
             <div className="wiki-configure-sources">
               {sourceSlots.map((value, index) => (
@@ -265,9 +364,9 @@ export function WikiConfigureModal({ onClose }: Props) {
             type="button"
             className="modal-btn-primary"
             disabled={busy || addingUrl || loading}
-            onClick={() => void handleSaveSources()}
+            onClick={() => void handleSave()}
           >
-            {busy ? "저장 중…" : "Sources 저장"}
+            {busy ? "저장 중…" : "저장"}
           </button>
         </div>
       </div>

@@ -87,7 +87,8 @@ def _resolve_inputs(
     Priority:
     1. Explicit CLI ``--input`` values
     2. Per-user ``wiki_sources.json`` ``AGENT_WIKI_SOURCES``
-    3. ``{wiki}/raw`` if present, else wiki root
+    3. Always also ``{wiki}/raw`` when it contains files
+    4. If nothing else: ``{wiki}/raw`` if present, else wiki root
     """
     from application import utils
 
@@ -116,6 +117,10 @@ def _resolve_inputs(
     else:
         for raw in utils.get_wiki_source_folders(user_id):
             _add(Path(raw))
+        # Always include inbox uploads when present (Configure → 문서 추가).
+        raw_dir = wiki / "raw"
+        if raw_dir.is_dir() and any(raw_dir.iterdir()):
+            _add(raw_dir)
         if not resolved:
             _add(_default_input(wiki))
 

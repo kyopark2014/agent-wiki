@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -20,6 +20,9 @@ from application.wiki_jobs import (
 from application import utils
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
+
+_MAX_RAW_UPLOAD_BYTES = 80 * 1024 * 1024  # 80 MiB per file
+_MAX_RAW_UPLOAD_FILES = 30
 
 
 def wiki_graph_html_path(user_id: str) -> Path:
@@ -148,6 +151,63 @@ def ingest_wiki_url(body: WikiUrlIngest, request: Request) -> dict:
         "urls": result["urls"],
         "folders": utils.get_wiki_source_folders(user_id),
         "max_sources": utils.MAX_WIKI_SOURCE_FOLDERS,
+    }
+
+
+@router.post("/raw")
+async def upload_wiki_raw_files(
+    request: Request,
+    files: list[UploadFile] = File(...),
+) -> dict:
+    """Copy uploaded documents into the user's ``{wiki}/raw`` for later Sync."""
+    user_id = require_user_id(request)
+    if not files:
+        raise HTTPException(status_code=400, detail="업로드할 파일이 없습니다.")
+    if len(files) > _MAX_RAW_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"한 번에 최대 {_MAX_RAW_UPLOAD_FILES}개까지 업로드할 수 있습니다.",
+        )
+
+    payloads: list[tuple[str, bytes]] = []
+    try:
+        for upload in files:
+            name = (upload.filename or "").strip() or "upload.bin"
+            data = await upload.read()
+            if not data:
+                continue
+            if len(data) > _MAX_RAW_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"파일이 너무 큽니다: {name} "
+                        f"(최대 {_MAX_RAW_UPLOAD_BYTES // (1024 * 1024)}MB)"
+                    ),
+                )
+            payloads.append((name, data))
+    finally:
+        for upload in files:
+            try:
+                await upload.close()
+            except Exception:
+                pass
+
+    try:
+        result = utils.save_wiki_raw_uploads(payloads, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"문서 저장 실패: {exc}",
+        ) from exc
+
+    return {
+        "wiki_dir": utils.get_user_wiki_dir(user_id),
+        "raw_dir": result["raw_dir"],
+        "saved": result["saved"],
+        "count": result["count"],
+        "files": result.get("files") or utils.get_wiki_source_files(user_id),
     }
 
 

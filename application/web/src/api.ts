@@ -116,6 +116,13 @@ export interface WikiUrlIngestResult {
   max_sources: number;
 }
 
+export interface WikiRawUploadResult {
+  wiki_dir: string;
+  raw_dir: string;
+  count: number;
+  saved: Array<{ name: string; path: string; bytes: number }>;
+}
+
 export interface WikiBrowseResult {
   path: string;
   parent: string | null;
@@ -186,6 +193,38 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ url }),
     }),
+  uploadWikiRawFiles: async (files: File[]): Promise<WikiRawUploadResult> => {
+    if (!files.length) {
+      throw new Error("업로드할 파일이 없습니다.");
+    }
+    uiLog("wiki:raw upload start", { count: files.length });
+    const form = new FormData();
+    for (const file of files) {
+      form.append("files", file, file.name);
+    }
+    const res = await fetch("/api/wiki/raw", {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      uiError("wiki:raw upload failed", { status: res.status, body: text });
+      let message = text || res.statusText;
+      try {
+        const parsed = JSON.parse(text) as { detail?: string };
+        if (typeof parsed.detail === "string" && parsed.detail) {
+          message = parsed.detail;
+        }
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const data = (await res.json()) as WikiRawUploadResult;
+    uiLog("wiki:raw upload complete", data);
+    return data;
+  },
   browseWikiSources: (path?: string) => {
     const q = path ? `?path=${encodeURIComponent(path)}` : "";
     return request<WikiBrowseResult>(`/api/wiki/browse${q}`);

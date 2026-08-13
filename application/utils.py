@@ -235,7 +235,11 @@ def _normalize_wiki_source_url(value: object | None) -> str | None:
 
 
 def _default_wiki_sources_doc() -> dict[str, list[str]]:
-    return {"AGENT_WIKI_SOURCES": [], "AGENT_WIKI_URLS": []}
+    return {
+        "AGENT_WIKI_SOURCES": [],
+        "AGENT_WIKI_URLS": [],
+        "AGENT_WIKI_FILES": [],
+    }
 
 
 def _read_wiki_sources_file(path: str) -> dict[str, list[str]] | None:
@@ -249,10 +253,13 @@ def _read_wiki_sources_file(path: str) -> dict[str, list[str]] | None:
         doc = _default_wiki_sources_doc()
         folders = raw.get("AGENT_WIKI_SOURCES")
         urls = raw.get("AGENT_WIKI_URLS")
+        files = raw.get("AGENT_WIKI_FILES")
         if isinstance(folders, list):
             doc["AGENT_WIKI_SOURCES"] = [str(x) for x in folders]
         if isinstance(urls, list):
             doc["AGENT_WIKI_URLS"] = [str(x) for x in urls]
+        if isinstance(files, list):
+            doc["AGENT_WIKI_FILES"] = [str(x) for x in files]
         return doc
     except Exception as e:
         logger.warning("Failed to load wiki sources %s: %s", path, e)
@@ -260,7 +267,7 @@ def _read_wiki_sources_file(path: str) -> dict[str, list[str]] | None:
 
 
 def load_wiki_sources(user_id: str | None = None) -> dict[str, list[str]]:
-    """Load Wiki Sync folders/URLs from ``{user}/wiki/wiki_sources.json``."""
+    """Load Wiki Sync folders/URLs/files from ``{user}/wiki/wiki_sources.json``."""
     path = wiki_sources_path(user_id)
     doc = _read_wiki_sources_file(path)
     if doc is not None:
@@ -276,6 +283,7 @@ def _write_wiki_sources_doc(
     payload = {
         "AGENT_WIKI_SOURCES": list(doc.get("AGENT_WIKI_SOURCES") or []),
         "AGENT_WIKI_URLS": list(doc.get("AGENT_WIKI_URLS") or []),
+        "AGENT_WIKI_FILES": list(doc.get("AGENT_WIKI_FILES") or []),
     }
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -318,6 +326,49 @@ def get_wiki_source_urls(user_id: str | None = None) -> list[str]:
         if url:
             out.append(url)
     return out
+
+
+def get_wiki_source_files(user_id: str | None = None) -> list[str]:
+    """Append-only uploaded document paths under ``{wiki}/raw``."""
+    raw = load_wiki_sources(user_id).get("AGENT_WIKI_FILES") or []
+    out: list[str] = []
+    for item in raw:
+        path = _normalize_wiki_source_path(item)
+        if path:
+            out.append(path)
+    return out
+
+
+def append_wiki_source_files(
+    paths: list[str], *, user_id: str | None = None
+) -> list[str]:
+    """Append saved raw document paths to wiki_sources.json (dedupe by path)."""
+    doc = load_wiki_sources(user_id)
+    history = list(doc.get("AGENT_WIKI_FILES") or [])
+    seen = {os.path.abspath(os.path.expanduser(p)) for p in history if p}
+    added = 0
+    for item in paths:
+        path = _normalize_wiki_source_path(item)
+        if not path or path in seen:
+            continue
+        history.append(path)
+        seen.add(path)
+        added += 1
+    _write_wiki_sources_doc(
+        {
+            "AGENT_WIKI_SOURCES": list(doc.get("AGENT_WIKI_SOURCES") or []),
+            "AGENT_WIKI_URLS": list(doc.get("AGENT_WIKI_URLS") or []),
+            "AGENT_WIKI_FILES": history,
+        },
+        user_id=user_id,
+    )
+    if added:
+        logger.info(
+            "wiki sources appended files user=%s count=%s",
+            sanitize_user_path_segment(user_id) or "default",
+            added,
+        )
+    return history
 
 
 def set_wiki_source_folders(
@@ -392,8 +443,13 @@ def append_wiki_source_url(
     history = list(doc.get("AGENT_WIKI_URLS") or [])
     history.append(normalized)
     folders = list(doc.get("AGENT_WIKI_SOURCES") or [])
+    files = list(doc.get("AGENT_WIKI_FILES") or [])
     _write_wiki_sources_doc(
-        {"AGENT_WIKI_SOURCES": folders, "AGENT_WIKI_URLS": history},
+        {
+            "AGENT_WIKI_SOURCES": folders,
+            "AGENT_WIKI_URLS": history,
+            "AGENT_WIKI_FILES": files,
+        },
         user_id=user_id,
     )
     logger.info(
@@ -421,14 +477,83 @@ def ingest_wiki_url(url: str, *, user_id: str | None = None) -> dict[str, object
     return {"url": normalized, "path": str(path), "urls": history}
 
 
+def _wiki_raw_dest_path(raw_dir: "Path", filename: str) -> "Path":
+    """Sanitize upload name under ``raw/``. Same name → overwrite."""
+    from pathlib import Path
+
+    raw_dir = Path(raw_dir)
+    name = Path(str(filename or "").strip() or "upload.bin").name
+    # Block path traversal in uploaded names.
+    name = name.replace("\x00", "").replace("/", "_").replace("\\", "_")
+    if not name or name in (".", ".."):
+        name = "upload.bin"
+    return raw_dir / name
+
+
+def save_wiki_raw_uploads(
+    files: list[tuple[str, bytes]],
+    *,
+    user_id: str | None = None,
+) -> dict[str, object]:
+    """Write uploaded files into ``{user}/wiki/raw`` (overwrite same filename)."""
+    from pathlib import Path
+
+    if not files:
+        raise ValueError("업로드할 파일이 없습니다.")
+
+    wiki = Path(ensure_user_wiki_dir(user_id))
+    raw_dir = wiki / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    saved: list[dict[str, object]] = []
+    for filename, data in files:
+        if data is None:
+            continue
+        dest = _wiki_raw_dest_path(raw_dir, filename)
+        overwritten = dest.is_file()
+        dest.write_bytes(data)
+        saved.append(
+            {
+                "name": dest.name,
+                "path": str(dest),
+                "bytes": len(data),
+                "overwritten": overwritten,
+            }
+        )
+        logger.info(
+            "wiki raw upload user=%s → %s (%s bytes%s)",
+            sanitize_user_path_segment(user_id) or "default",
+            dest,
+            len(data),
+            ", overwrite" if overwritten else "",
+        )
+
+    if not saved:
+        raise ValueError("저장할 파일이 없습니다.")
+
+    file_history = append_wiki_source_files(
+        [str(item["path"]) for item in saved],
+        user_id=user_id,
+    )
+
+    return {
+        "wiki_dir": str(wiki),
+        "raw_dir": str(raw_dir),
+        "saved": saved,
+        "count": len(saved),
+        "files": file_history,
+    }
+
+
 def set_wiki_sources(
     *,
     folders: list[object] | None = None,
     user_id: str | None = None,
 ) -> dict[str, list[str]]:
-    """Persist Wiki Sync folders for the user (URL history preserved)."""
+    """Persist Wiki Sync folders for the user (URL/file history preserved)."""
     doc = load_wiki_sources(user_id)
     url_history = list(doc.get("AGENT_WIKI_URLS") or [])
+    file_history = list(doc.get("AGENT_WIKI_FILES") or [])
 
     if folders is None:
         cleaned_folders = get_wiki_source_folders(user_id)
@@ -450,16 +575,22 @@ def set_wiki_sources(
         {
             "AGENT_WIKI_SOURCES": cleaned_folders,
             "AGENT_WIKI_URLS": url_history,
+            "AGENT_WIKI_FILES": file_history,
         },
         user_id=user_id,
     )
     logger.info(
-        "wiki sources saved user=%s folders=%s url_history=%s",
+        "wiki sources saved user=%s folders=%s url_history=%s files=%s",
         sanitize_user_path_segment(user_id) or "default",
         cleaned_folders,
         len(url_history),
+        len(file_history),
     )
-    return {"folders": cleaned_folders, "urls": get_wiki_source_urls(user_id)}
+    return {
+        "folders": cleaned_folders,
+        "urls": get_wiki_source_urls(user_id),
+        "files": get_wiki_source_files(user_id),
+    }
 
 
 GRAPH_PATTERNS = ("pattern1", "pattern2", "pattern3")

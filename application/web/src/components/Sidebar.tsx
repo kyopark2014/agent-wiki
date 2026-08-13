@@ -418,6 +418,18 @@ export function Sidebar({
                 <McpIcon className="sidebar-icon" />
                 <span>MCP ({mcpServers.length})</span>
               </button>
+              <button
+                ref={wikiBtnRef}
+                type="button"
+                className={`sidebar-menu-btn${drawer === "wiki" || wikiSyncBusy ? " is-active" : ""}`}
+                aria-expanded={drawer === "wiki"}
+                aria-haspopup="dialog"
+                title={wikiSyncMessage ?? "Wiki"}
+                onClick={() => toggleDrawer("wiki")}
+              >
+                <WikiIcon className="sidebar-icon" />
+                <span>{wikiSyncBusy ? "Wiki (Syncing…)" : "Wiki"}</span>
+              </button>
               <label className="sidebar-menu-btn settings-toggle">
                 <GuardrailIcon className="sidebar-icon" />
                 <span>Guardrail</span>
@@ -468,18 +480,6 @@ export function Sidebar({
                   }}
                 />
               </label>
-              <button
-                ref={wikiBtnRef}
-                type="button"
-                className={`sidebar-menu-btn${drawer === "wiki" || wikiSyncBusy ? " is-active" : ""}`}
-                aria-expanded={drawer === "wiki"}
-                aria-haspopup="dialog"
-                title={wikiSyncMessage ?? "Wiki (~/Documents/wiki)"}
-                onClick={() => toggleDrawer("wiki")}
-              >
-                <WikiIcon className="sidebar-icon" />
-                <span>{wikiSyncBusy ? "Wiki (Syncing…)" : "Wiki"}</span>
-              </button>
               <button
                 type="button"
                 className={`sidebar-menu-btn${llmGatewayOpen ? " is-active" : ""}`}
