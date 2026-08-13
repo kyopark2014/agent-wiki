@@ -37,13 +37,15 @@ OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구�
 1. [개요](#개요)
 2. [Operation Architecture](#operation-architecture)
 3. [LLM Wiki vs RAG](#️-llm-wiki-vs-rag--언제-뭘-쓸까)
-4. [graphify](#graphify) — corpus → graph 파이프라인
-5. [Graph](#graph) — 시각화 패턴 · 장단점
-6. [검색하는 방법](#검색하는-방법) — `/graphify` CLI
-7. [문서검색](#문서검색) — 앱 내 Ask 패널
-8. [실행 방법](#실행-방법)
-9. [실행 결과](#실행-결과)
-10. [Reference](#reference)
+4. [Knowledge Graph · Wiki Graph 개요](#knowledge-graph--wiki-graph-개요)
+5. [Knowledge Graph](#knowledge-graph) — 대화 → `graph/` 파이프라인
+6. [Wiki Graph](#wiki-graph) — `raw` / Sources → Wiki Sync
+7. [Graph](#graph) — 시각화 패턴 · 장단점
+8. [검색하는 방법](#검색하는-방법) — `/graphify` CLI
+9. [문서검색](#문서검색) — 앱 내 Ask 패널
+10. [실행 방법](#실행-방법)
+11. [실행 결과](#실행-결과)
+12. [Reference](#reference)
 
 ---
 
@@ -96,7 +98,7 @@ agent-wiki/
 └── requirements.txt
 ```
 
-사용자별 세션 데이터(대화 DB, graph corpus/out, settings)는 보통 session storage 아래 `{user}/`에 두며, 그래프는 `{user}/graph/out/graph.html` 형태로 publish됩니다. 상세 경로는 [graph/README.md](./graph/README.md)를 참고하세요.
+사용자별 세션 데이터(대화 DB, Knowledge Graph, Wiki Graph, settings)는 `.session_storage/{user}/` 아래에 둡니다. Knowledge Graph는 `{user}/graph/out/graph.html`, Wiki Graph는 `{user}/wiki/graphify-out/`입니다. 상세는 [Knowledge Graph](#knowledge-graph) · [Wiki Graph](#wiki-graph) · [graph/README.md](./graph/README.md)를 참고하세요.
 
 ## Operation Architecture
 
@@ -177,39 +179,38 @@ Agent는 도구(MCP)·Skill 지시문을 받아 ReAct 루프로 동작합니다.
 
 agent-wiki에서는 **채팅 Agent(필요 시 RAG MCP)** 와 **그래프 문서검색**을 함께 둘 수 있습니다. 그래프 쪽은 임베딩 인덱스 없이 `graph.json` 순회 + 원문 excerpt로 답을 보강합니다.
 
-## graphify
+## Knowledge Graph · Wiki Graph 개요
 
-코드, 문서, 논문, 이미지, 영상, YouTube 링크가 담긴 폴더를 `/graphify` 명령어 하나로 [쿼리 가능한 지식 그래프로 변환하는 Skill](https://github.com/safishamsi/graphify)입니다. Karpathy의 `/raw` 폴더 아이디어를 실제로 구현한 오픈소스이며, **폴더 단위 일괄 추출**에 강합니다.
+agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
 
-업스트림 CLI가 남기는 산출물 예:
+| | **Knowledge Graph** | **Wiki Graph** |
+|--|---------------------|----------------|
+| 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
+| 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
+| 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
+| API | `GET /api/graph` | `GET /api/wiki/graph` |
+| 갱신 | `run_pipeline` / `POST /api/graph/rebuild` | Settings → Wiki → **Sync** |
+| 보기 | 사이드바 브랜드 **Agent wiki (user)** | Settings → Wiki → **Graph** |
 
-```text
-graphify-out/
-├── graph.html       # 인터랙티브 그래프 (노드 클릭, 검색, 커뮤니티 필터)
-├── GRAPH_REPORT.md  # God Node, 놀라운 연결, 추천 질문
-├── graph.json       # 쿼리 가능한 영속 그래프
-└── cache/           # SHA256 캐시 (변경된 파일만 재처리)
-```
+---
 
-설치 (업스트림 CLI / Skill용):
+## Knowledge Graph
 
-```text
-pip install graphifyy && graphify install
-/graphify .   # 현재 폴더에 실행
-```
+**채팅 대화**에서 엔티티·관계를 뽑아, 사이드바 브랜드 클릭 시 모달로 보는 그래프입니다. Cursor `/graphify` Skill에만 의존하지 않고, [`graph/`](./graph/) 단독 파이프라인이 **tasks.db → corpus → graph.json → HTML**을 만듭니다. 오케스트레이터는 [run_pipeline.py](./graph/run_pipeline.py)입니다.
 
-업스트림 graphify CLI 파이프라인:
+### 폴더 위치
 
-```
-detect() → extract() → build_graph() → cluster() → analyze() → report() → export()
-```
+| 역할 | 경로 |
+|------|------|
+| 파이프라인 코드 | `agent-wiki/graph/` (`run_pipeline.py`, `export_corpus.py`, …) |
+| 사용자 작업 공간 | `{SESSION_STORAGE}/.session_storage/{user}/graph/` |
+| Corpus | `…/graph/corpus/*.md` |
+| 산출물 | `…/graph/out/graph.json`, `graph.html` (+ `GRAPH_REPORT.md`, `node_embeddings.json`) |
+| 입력 DB | `tasks.db` (Agent 대화) |
 
-### agent-wiki에서의 역할
+예: `{user}/graph/out/graph.html` → `GET /api/graph`
 
-이 저장소에서는 Cursor `/graphify` Skill에만 의존하지 않습니다. [`graph/`](./graph/) 단독 파이프라인이 Agent 대화 DB를 읽어 **tasks.db → corpus → graph.json → HTML**을 만듭니다. 오케스트레이터는 [run_pipeline.py](./graph/run_pipeline.py)입니다.
-
-- **채팅에서의 `/graphify …`**: Skill이 contents 등 폴더를 그래프로 만들거나 질의할 때 (실행 결과 스크린샷 참고).
-- **앱 Knowledge Graph**: 사용자 대화 turn을 자동/수동으로 추출해 사이드바에서 보는 HTML 그래프 + 문서검색.
+### 생성 과정
 
 ```mermaid
 flowchart LR
@@ -221,7 +222,13 @@ flowchart LR
   PUB --> HTML[graph.html]
 ```
 
-### corpus → graph 추출 단계
+```text
+tasks.db
+  → export_corpus   (turn → corpus/*.md, SHA256 캐시·delta)
+  → run_extract     (LLM 시맨틱 추출 → nodes/edges)
+  → build_graph     (cluster → graph.json + GRAPH_REPORT.md)
+  → publish_out     (pattern1/2/3 → graph.html + 문서검색 패널)
+```
 
 | 단계 | 스크립트 / 모듈 | LLM? | 하는 일 |
 |------|-----------------|------|---------|
@@ -265,21 +272,123 @@ python publish_out.py --user user01
 
 앱에서도 Settings로 Knowledge Graph를 켠 뒤 `POST /api/graph/rebuild`로 백그라운드 추출을 걸 수 있습니다 (`graph_jobs.py`, 쿨다운·지문 스킵 포함).
 
-앱 UI Knowledge Graph의 시각화·문서검색은 아래 [Graph](#graph)를 참고하세요.
+**입력은 대화 turn 마크다운**입니다. 폴더·PDF 일괄 추출은 아래 [Wiki Graph](#wiki-graph)를 사용합니다. 시각화·문서검색 UI는 [Graph](#graph)를 참고하세요.
+
+---
+
+## Wiki Graph
+
+**위키 코퍼스**(`raw` / Sources)를 Sync해 만드는 그래프입니다. 채팅 세션 저장소(Knowledge Graph)와 완전히 분리됩니다. 기반은 [graphify](https://github.com/safishamsi/graphify) Skill/CLI — Karpathy의 `/raw` inbox 아이디어를 폴더 단위로 추출합니다.
+
+오케스트레이터: [sync_wiki.py](./application/skills/graphify/scripts/sync_wiki.py)  
+트리거: Settings → Wiki → **Sync** (`wiki_jobs.py` 백그라운드)
+
+### 폴더 위치
+
+| 역할 | 경로 |
+|------|------|
+| Wiki 루트 | `.session_storage/{user}/wiki/` (로그인 사용자별) |
+| Inbox | `{wiki}/raw/` — 넣고 싶은 원본을 모음 |
+| Sources | Settings → Wiki → Configure (최대 3개, `{wiki}/wiki_sources.json`) |
+| 산출물 디렉터리 | `{wiki}/graphify-out/` |
+| 앱용 HTML | `graphify-out/app-graph.html` → `GET /api/wiki/graph` |
+| JSON | `graphify-out/graph.json` |
+
+```text
+application/.session_storage/{user}/wiki/
+├── raw/                   # 논문·노트·PDF·URL 수집본 (inbox)
+├── wiki_sources.json      # Sync Sources · URL 이력 (사용자별)
+└── graphify-out/
+    ├── converted/         # PDF/Office → markdown 변환본
+    ├── graph.json
+    ├── GRAPH_REPORT.md
+    ├── app-graph.html     # 앱 Wiki Graph UI
+    └── cache/             # SHA256 캐시 (변경된 파일만 재처리)
+```
+
+> **Note:** Upstream graphify `detect()`는 기본적으로 **Source 폴더 옆**에 `{source}/graphify-out/converted`를 만듭니다. Wiki Sync는 이를 **해당 사용자의** `{wiki}/graphify-out/converted`로 옮긴 뒤, PDF 등 시맨틱용 마크다운도 같은 곳에 둡니다. Source 옆 `graphify-out`은 Sync 산출물이 아닙니다.
+
+### 생성 과정
+
+```text
+Sources / raw (없으면 Wiki 루트)
+  → detect (증분이면 detect_incremental)
+  → AST 추출 (코드)
+  → 시맨틱 추출 (.md; pdf/txt는 md로 변환 후)
+  → build + cluster
+  → graphify-out/graph.json · GRAPH_REPORT.md
+  → republish → app-graph.html (Force Atlas / Neo4j / Holistic)
+```
+
+업스트림 graphify CLI 파이프라인(동일 계열):
+
+```
+detect() → extract() → build_graph() → cluster() → analyze() → report() → export()
+```
+
+설치 (업스트림 CLI / Skill용):
+
+```text
+pip install graphifyy && graphify install
+/graphify .   # 현재 폴더에 실행
+```
+
+채팅에서 `/graphify …` Skill을 쓰면 contents 등 폴더를 직접 그래프로 만들거나 질의할 수 있습니다(앱 Wiki Sync와 산출물 개념이 맞닿아 있음).
+
+### 문서의 추가 (`raw` · Sources)
+
+Wiki Graph용 원본은 **`raw` 입력함(inbox)** 에 모읍니다. `raw`는 Sync가 자동 생성하는 폴더가 아니라, **넣고 싶은 코퍼스를 모아 두는 곳**입니다.
+
+Settings → Wiki → Sync는 `raw/`가 있으면 그 폴더를, 없으면 Wiki 루트 전체를 추출합니다. Sources를 Configure에서 지정하면 해당 폴더(최대 3개)를 추출합니다.
+
+#### `raw`의 용도
+
+- 논문·노트·스크린샷·코드·PDF 등 **그래프에 넣고 싶은 원본**을 두는 폴더
+- 직접 복사·이동하거나, `/graphify add <url>`로 URL을 받아 `./raw`에 저장
+- Sync / `/graphify`가 이 폴더(또는 지정 경로)를 읽어 `graphify-out/`에 그래프를 만듦
+
+#### 예: `/document/doc/doc01.pdf`만 있는 경우
+
+`raw`에 자동으로 들어오지 않습니다.
+
+| 하는 일 | `raw`에 생기는 것 |
+|---------|-------------------|
+| 아무것도 안 함 | 없음 |
+| 파일을 `{wiki}/raw/`로 복사·이동 | `doc01.pdf` (넣은 그대로) |
+| `/graphify /document/doc` | `raw`가 아니라 **그 경로를 직접** 추출 (raw에 복사본을 만들지 않음) |
+| `/graphify add <url>` | 받은 내용이 `./raw`에 저장됨 |
+
+앱에서는 Settings → Wiki → **Configure**로 Sync **Sources**를 최대 3개까지 지정하고(Source 선택 시 폴더 메뉴), URL은 입력 시 바로 해당 사용자의 `{wiki}/raw`에 저장합니다. URL 이력·Sources는 `{wiki}/wiki_sources.json`에 저장됩니다. **Sync** 후 **Graph**로 결과를 봅니다.
+
+시맨틱 단계는 `.md`를 입력으로 쓰므로, Source의 `.pdf`/`.txt`는 Sync 시 텍스트 마크다운으로 변환한 뒤 추출합니다(이미지는 vision 미지원으로 skip).
+
+### URL 리소스 수집 방식
+
+Configure에서 URL을 **추가하는 순간** `graphify.ingest`가 HTTP(S)로 리소스를 가져와 해당 사용자의 `{wiki}/raw`에 저장합니다. Sync는 URL을 다시 fetch하지 않고, 이미 `raw`에 있는 파일(+설정된 폴더)만 추출합니다.
+
+| URL 유형 | 동작 |
+|----------|------|
+| 일반 웹페이지 | HTML을 받은 뒤 `html2text`로 마크다운 `.md`로 변환해 저장 |
+| PDF / 이미지 | 바이너리로 그대로 다운로드 |
+| tweet / arXiv / YouTube / GitHub 등 | 타입별 분기 (oEmbed, 초록, 오디오 등) |
+
+구현은 브라우저 자동화(Playwright 등)가 아니라 **서버 측 HTTP fetch + HTML→마크다운 변환**입니다 (`urllib` 기반 `safe_fetch`). http/https만 허용하고, private IP·클라우드 메타데이터 엔드포인트는 차단합니다. JavaScript로만 렌더링되는 사이트는 본문이 거의 안 잡힐 수 있습니다.
 
 ### 지원 파일 (업스트림 /graphify Skill 기준)
 
 - Code: .py, .ts, .js, .go, .rs, .java, .cpp, etc.
 - Documents: .md, .txt, .docx, etc.
 - Papers: .pdf
-- Images: .png, .jpg, .webp (vision 분석)
+- Images: .png, .jpg, .webp (vision 분석 — CLI/Skill; 앱 Wiki Sync는 이미지 skip)
 - Video/Audio: .mp4, .mp3, .wav (Whisper 전사)
 
-agent-wiki `graph/` 파이프라인의 기본 입력은 **대화 turn 마크다운**입니다. 폴더 단위 멀티모달 추출은 Skill/CLI `/graphify` 경로를 사용합니다.
+시각화 패턴·문서검색은 아래 [Graph](#graph)를 참고하세요.
+
+---
 
 ## Graph
 
-`graph/`는 Agent 대화·코퍼스에서 뽑은 `graph.json`을 **vis-network** HTML로 publish합니다. 같은 그래프 데이터를 `patterns.py`가 세 가지 UI 패턴으로 렌더하며, 선택값은 사용자 `settings.json`의 `graph_pattern`에 저장됩니다. 패턴 전환 시 **재추출 없이 HTML만** 다시 생성합니다.
+Knowledge Graph·Wiki Graph 모두 `graph.json`을 **vis-network** HTML로 publish합니다. 같은 그래프 데이터를 `patterns.py`가 세 가지 UI 패턴으로 렌더합니다. Knowledge Graph는 사용자 `settings.json`의 `graph_pattern`, Wiki Graph는 `graphify-out/.wiki_graph_pattern`에 저장됩니다. 패턴 전환 시 **재추출 없이 HTML만** 다시 생성합니다.
 
 ### UI에서 보기
 

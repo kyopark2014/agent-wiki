@@ -273,7 +273,7 @@ async function submitAsk() {
   openAskPanel();
   body.innerHTML = '<div class="ask-status">문서를 검색하는 중…</div>';
   try {
-    const res = await fetch('/api/graph/query', {
+    const res = await fetch('<<<GRAPH_QUERY_URL>>>', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },

@@ -7,6 +7,8 @@ import type { AppConfig, Task } from "../types";
 import { ConfigDrawer } from "./ConfigDrawer";
 import { KnowledgeGraphModal } from "./KnowledgeGraphModal";
 import { LlmGatewayModal } from "./LlmGatewayModal";
+import { WikiGraphModal } from "./WikiGraphModal";
+import { WikiConfigureModal } from "./WikiConfigureModal";
 import { TaskListItem } from "./TaskListItem";
 import {
   AppearanceIcon,
@@ -22,15 +24,17 @@ import {
   NewTaskIcon,
   SettingsIcon,
   SkillIcon,
+  WikiIcon,
   CloseIcon,
 } from "./SidebarIcons";
 
-type DrawerKind = "skill" | "mcp" | "model" | "appearance" | null;
+type DrawerKind = "skill" | "mcp" | "model" | "appearance" | "wiki" | null;
 
 const LLM_GATEWAY_NOT_CONFIGURED =
   "LLM Gateway가 설정되어 있지 않아 활성화할 수 없습니다. 관리자에게 설정을 요청하세요.";
 
 const THEME_OPTIONS = ["Light", "Dark"] as const;
+const WIKI_OPTIONS = ["Sync", "Graph", "Configure"] as const;
 
 function themeToLabel(theme: Theme): string {
   return theme === "light" ? "Light" : "Dark";
@@ -85,9 +89,14 @@ export function Sidebar({
   const mcpBtnRef = useRef<HTMLButtonElement>(null);
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const appearanceBtnRef = useRef<HTMLButtonElement>(null);
+  const wikiBtnRef = useRef<HTMLButtonElement>(null);
   const settingsSectionRef = useRef<HTMLDivElement>(null);
   const [llmGatewayOpen, setLlmGatewayOpen] = useState(false);
   const [knowledgeGraphOpen, setKnowledgeGraphOpen] = useState(false);
+  const [wikiGraphOpen, setWikiGraphOpen] = useState(false);
+  const [wikiConfigureOpen, setWikiConfigureOpen] = useState(false);
+  const [wikiSyncBusy, setWikiSyncBusy] = useState(false);
+  const [wikiSyncMessage, setWikiSyncMessage] = useState<string | null>(null);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const { theme, setTheme } = useTheme();
   const skills = activeTask?.skills ?? config?.default_skills ?? [];
@@ -132,13 +141,92 @@ export function Sidebar({
       if (!(target instanceof Element)) return;
       if (settingsSectionRef.current?.contains(target)) return;
       if (target.closest(".config-popover")) return;
-      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal")) return;
+      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal, .wiki-configure-modal")) return;
       collapseSettings();
     }
 
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [settingsExpanded, onCloseDrawer]);
+
+  async function handleWikiAction(choice: string) {
+    if (choice === "Graph") {
+      setWikiGraphOpen(true);
+      handleSettingApplied();
+      return;
+    }
+    if (choice === "Configure") {
+      setWikiConfigureOpen(true);
+      handleSettingApplied();
+      return;
+    }
+    if (choice !== "Sync") return;
+    setWikiSyncBusy(true);
+    setWikiSyncMessage(null);
+    try {
+      const result = await api.syncWiki(false);
+      const status = result.status;
+      if (status === "error") {
+        setWikiSyncBusy(false);
+        setWikiSyncMessage(result.error || "Wiki 동기화에 실패했습니다.");
+      } else if (status === "unchanged") {
+        setWikiSyncBusy(false);
+        setWikiSyncMessage("변경된 파일이 없습니다.");
+      } else {
+        // Keep syncing indicator; background poll clears it when done.
+        setWikiSyncBusy(true);
+        setWikiSyncMessage("Wiki 동기화를 백그라운드에서 실행 중입니다.");
+      }
+    } catch (err) {
+      setWikiSyncBusy(false);
+      setWikiSyncMessage(
+        err instanceof Error ? err.message : "Wiki 동기화에 실패했습니다.",
+      );
+    } finally {
+      // Do not open Graph modal — sync continues independently.
+      handleSettingApplied();
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function pollWikiSync() {
+      try {
+        const next = await api.getWikiStatus();
+        if (cancelled) return;
+        const busy = next.status === "queued" || next.status === "running";
+        setWikiSyncBusy(busy);
+        if (busy) {
+          setWikiSyncMessage(
+            next.message || "Wiki 동기화를 백그라운드에서 실행 중입니다.",
+          );
+          timer = setTimeout(pollWikiSync, 2500);
+          return;
+        }
+        if (next.status === "ready") {
+          setWikiSyncMessage("Wiki 동기화가 완료되었습니다.");
+        } else if (next.status === "unchanged") {
+          setWikiSyncMessage("변경된 파일이 없습니다.");
+        } else if (next.status === "error") {
+          setWikiSyncMessage(next.error || "Wiki 동기화에 실패했습니다.");
+        }
+      } catch {
+        if (cancelled) return;
+        // Keep polling while we believe a sync may be running.
+        if (wikiSyncBusy) {
+          timer = setTimeout(pollWikiSync, 4000);
+        }
+      }
+    }
+
+    void pollWikiSync();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [wikiSyncBusy]);
 
   function renderTask(task: Task, hidePinBadge = false) {
     return (
@@ -381,6 +469,18 @@ export function Sidebar({
                 />
               </label>
               <button
+                ref={wikiBtnRef}
+                type="button"
+                className={`sidebar-menu-btn${drawer === "wiki" || wikiSyncBusy ? " is-active" : ""}`}
+                aria-expanded={drawer === "wiki"}
+                aria-haspopup="dialog"
+                title={wikiSyncMessage ?? "Wiki (~/Documents/wiki)"}
+                onClick={() => toggleDrawer("wiki")}
+              >
+                <WikiIcon className="sidebar-icon" />
+                <span>{wikiSyncBusy ? "Wiki (Syncing…)" : "Wiki"}</span>
+              </button>
+              <button
                 type="button"
                 className={`sidebar-menu-btn${llmGatewayOpen ? " is-active" : ""}`}
                 disabled={!activeTask}
@@ -453,6 +553,19 @@ export function Sidebar({
           onClose={handleDrawerClose}
         />
       )}
+      {drawer === "wiki" && (
+        <ConfigDrawer
+          title="Wiki"
+          options={[...WIKI_OPTIONS]}
+          selected={[]}
+          mode="single"
+          anchorEl={wikiBtnRef.current}
+          onChange={(next) => {
+            if (next[0]) void handleWikiAction(next[0]);
+          }}
+          onClose={handleDrawerClose}
+        />
+      )}
 
       {knowledgeGraphOpen && knowledgeGraphEnabled && (
         <KnowledgeGraphModal
@@ -460,6 +573,14 @@ export function Sidebar({
           title={brandTitle}
           onClose={() => setKnowledgeGraphOpen(false)}
         />
+      )}
+
+      {wikiGraphOpen && (
+        <WikiGraphModal onClose={() => setWikiGraphOpen(false)} />
+      )}
+
+      {wikiConfigureOpen && (
+        <WikiConfigureModal onClose={() => setWikiConfigureOpen(false)} />
       )}
 
       {llmGatewayOpen && activeTask && (

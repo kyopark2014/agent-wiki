@@ -128,6 +128,340 @@ def user_graph_html_path(user_id: str | None) -> str:
     return os.path.join(SESSION_STORAGE_DIR, segment, "graph", "out", "graph.html")
 
 
+def get_user_wiki_dir(user_id: str | None) -> str:
+    """Per-user wiki root: ``{SESSION_STORAGE_DIR}/{user_id}/wiki``.
+
+    Replaces the old global ``AGENT_WIKI_DIR`` (~/Documents/wiki) so each
+    login user gets an isolated raw/ + graphify-out/ tree.
+    """
+    segment = sanitize_user_path_segment(user_id)
+    if not segment:
+        segment = "default"
+    return os.path.join(SESSION_STORAGE_DIR, segment, "wiki")
+
+
+def get_wiki_dir(user_id: str | None = None) -> str:
+    """Alias for :func:`get_user_wiki_dir` (requires ``user_id`` in multi-user use)."""
+    return get_user_wiki_dir(user_id)
+
+
+def ensure_user_wiki_dir(user_id: str | None) -> str:
+    """Create ``{user}/wiki``, ``raw/``, ``graphify-out/`` and return wiki root."""
+    segment = sanitize_user_path_segment(user_id)
+    if not segment:
+        raise ValueError(
+            "Invalid user_id for wiki path; expected a plain user id, "
+            "not a signed session cookie"
+        )
+    wiki = os.path.join(SESSION_STORAGE_DIR, segment, "wiki")
+    for name in ("", "raw", "graphify-out", os.path.join("graphify-out", "converted")):
+        os.makedirs(os.path.join(wiki, name) if name else wiki, exist_ok=True)
+    logger.info("user wiki dir ready: %s", wiki)
+    return wiki
+
+
+def ensure_wiki_dir(user_id: str | None = None) -> str:
+    """Alias for :func:`ensure_user_wiki_dir`."""
+    return ensure_user_wiki_dir(user_id)
+
+
+def wiki_graphify_out_dir(user_id: str | None = None) -> str:
+    """``{SESSION_STORAGE}/{user}/wiki/graphify-out``."""
+    return os.path.join(get_user_wiki_dir(user_id), "graphify-out")
+
+
+def wiki_graph_html_path(user_id: str | None = None) -> str:
+    """Pattern UI HTML served by /api/wiki/graph (Force Atlas / Neo4j / Holistic)."""
+    return os.path.join(wiki_graphify_out_dir(user_id), "app-graph.html")
+
+
+def wiki_graph_json_path(user_id: str | None = None) -> str:
+    return os.path.join(wiki_graphify_out_dir(user_id), "graph.json")
+
+
+def wiki_graph_pattern_path(user_id: str | None = None) -> str:
+    return os.path.join(wiki_graphify_out_dir(user_id), ".wiki_graph_pattern")
+
+
+def get_wiki_graph_pattern(user_id: str | None = None) -> str:
+    """Selected Wiki Graph HTML pattern (pattern1|2|3)."""
+    path = wiki_graph_pattern_path(user_id)
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+            if raw:
+                return normalize_graph_pattern(raw)
+        except OSError:
+            pass
+    return DEFAULT_GRAPH_PATTERN
+
+
+def set_wiki_graph_pattern(
+    pattern: object | None, user_id: str | None = None
+) -> str:
+    """Persist Wiki Graph pattern under the user's graphify-out."""
+    pid = normalize_graph_pattern(pattern)
+    out = wiki_graphify_out_dir(user_id)
+    os.makedirs(out, exist_ok=True)
+    with open(wiki_graph_pattern_path(user_id), "w", encoding="utf-8") as f:
+        f.write(pid + "\n")
+    return pid
+
+
+MAX_WIKI_SOURCE_FOLDERS = 3
+
+
+def wiki_sources_path(user_id: str | None = None) -> str:
+    """Per-user sources file: ``{SESSION_STORAGE}/{user}/wiki/wiki_sources.json``."""
+    return os.path.join(get_user_wiki_dir(user_id), "wiki_sources.json")
+
+
+def _normalize_wiki_source_path(value: object | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    return os.path.abspath(os.path.expanduser(raw))
+
+
+def _normalize_wiki_source_url(value: object | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    if not (lower.startswith("http://") or lower.startswith("https://")):
+        raise ValueError(f"URL은 http:// 또는 https:// 로 시작해야 합니다: {raw}")
+    return raw
+
+
+def _default_wiki_sources_doc() -> dict[str, list[str]]:
+    return {"AGENT_WIKI_SOURCES": [], "AGENT_WIKI_URLS": []}
+
+
+def _read_wiki_sources_file(path: str) -> dict[str, list[str]] | None:
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict):
+            return None
+        doc = _default_wiki_sources_doc()
+        folders = raw.get("AGENT_WIKI_SOURCES")
+        urls = raw.get("AGENT_WIKI_URLS")
+        if isinstance(folders, list):
+            doc["AGENT_WIKI_SOURCES"] = [str(x) for x in folders]
+        if isinstance(urls, list):
+            doc["AGENT_WIKI_URLS"] = [str(x) for x in urls]
+        return doc
+    except Exception as e:
+        logger.warning("Failed to load wiki sources %s: %s", path, e)
+        return None
+
+
+def load_wiki_sources(user_id: str | None = None) -> dict[str, list[str]]:
+    """Load Wiki Sync folders/URLs from ``{user}/wiki/wiki_sources.json``."""
+    path = wiki_sources_path(user_id)
+    doc = _read_wiki_sources_file(path)
+    if doc is not None:
+        return doc
+    return _default_wiki_sources_doc()
+
+
+def _write_wiki_sources_doc(
+    doc: dict[str, list[str]], *, user_id: str | None = None
+) -> None:
+    ensure_user_wiki_dir(user_id)
+    path = wiki_sources_path(user_id)
+    payload = {
+        "AGENT_WIKI_SOURCES": list(doc.get("AGENT_WIKI_SOURCES") or []),
+        "AGENT_WIKI_URLS": list(doc.get("AGENT_WIKI_URLS") or []),
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def get_wiki_source_folders(user_id: str | None = None) -> list[str]:
+    """Configured Wiki Sync source folders (max 3) for the user.
+
+    Empty list → Sync falls back to ``{wiki}/raw`` if present, else wiki root.
+    """
+    raw = load_wiki_sources(user_id).get("AGENT_WIKI_SOURCES") or []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        path = _normalize_wiki_source_path(item)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        out.append(path)
+        if len(out) >= MAX_WIKI_SOURCE_FOLDERS:
+            break
+    return out
+
+
+def get_wiki_source_urls(user_id: str | None = None) -> list[str]:
+    """Append-only URL ingest history for the user (audit trail)."""
+    raw = load_wiki_sources(user_id).get("AGENT_WIKI_URLS") or []
+    out: list[str] = []
+    for item in raw:
+        try:
+            url = _normalize_wiki_source_url(item)
+        except ValueError:
+            text = str(item or "").strip()
+            if text:
+                out.append(text)
+            continue
+        if url:
+            out.append(url)
+    return out
+
+
+def set_wiki_source_folders(
+    folders: list[object] | None, user_id: str | None = None
+) -> list[str]:
+    """Persist up to 3 Wiki Sync source folders for the user."""
+    return set_wiki_sources(folders=folders, user_id=user_id)["folders"]
+
+
+def browse_wiki_source_dirs(
+    path: object | None = None, *, user_id: str | None = None
+) -> dict[str, object]:
+    """List child directories for the Wiki Configure source picker."""
+    home = os.path.abspath(os.path.expanduser("~"))
+    documents = os.path.join(home, "Documents")
+    wiki = get_user_wiki_dir(user_id)
+
+    raw = str(path or "").strip()
+    if raw:
+        target = _normalize_wiki_source_path(raw)
+    elif os.path.isdir(documents):
+        target = documents
+    else:
+        target = home
+    if not target or not os.path.isdir(target):
+        raise ValueError(f"폴더가 없습니다: {raw or target}")
+
+    parent = os.path.dirname(target)
+    if parent == target:
+        parent = None
+
+    entries: list[dict[str, str]] = []
+    try:
+        names = sorted(os.listdir(target), key=str.lower)
+    except OSError as exc:
+        raise ValueError(f"폴더를 읽을 수 없습니다: {target}") from exc
+
+    for name in names:
+        if name.startswith("."):
+            continue
+        child = os.path.join(target, name)
+        if not os.path.isdir(child):
+            continue
+        entries.append({"name": name, "path": child})
+
+    shortcuts: list[dict[str, str]] = []
+    for name, candidate in (
+        ("Home", home),
+        ("Documents", documents),
+        ("Wiki", wiki),
+        ("Wiki raw", os.path.join(wiki, "raw")),
+    ):
+        if os.path.isdir(candidate):
+            shortcuts.append({"name": name, "path": candidate})
+
+    return {
+        "path": target,
+        "parent": parent,
+        "dirs": entries,
+        "shortcuts": shortcuts,
+    }
+
+
+def append_wiki_source_url(
+    url: str, *, user_id: str | None = None
+) -> list[str]:
+    """Append a URL to the user's ingest history."""
+    normalized = _normalize_wiki_source_url(url)
+    if not normalized:
+        raise ValueError("URL이 비어 있습니다.")
+    doc = load_wiki_sources(user_id)
+    history = list(doc.get("AGENT_WIKI_URLS") or [])
+    history.append(normalized)
+    folders = list(doc.get("AGENT_WIKI_SOURCES") or [])
+    _write_wiki_sources_doc(
+        {"AGENT_WIKI_SOURCES": folders, "AGENT_WIKI_URLS": history},
+        user_id=user_id,
+    )
+    logger.info(
+        "wiki sources appended URL user=%s history=%s",
+        sanitize_user_path_segment(user_id) or "default",
+        normalized,
+    )
+    return history
+
+
+def ingest_wiki_url(url: str, *, user_id: str | None = None) -> dict[str, object]:
+    """Fetch a URL into the user's ``{wiki}/raw`` and append URL history."""
+    from pathlib import Path
+
+    from graphify.ingest import ingest
+
+    normalized = _normalize_wiki_source_url(url)
+    if not normalized:
+        raise ValueError("URL이 비어 있습니다.")
+    wiki = Path(ensure_user_wiki_dir(user_id))
+    raw_dir = wiki / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    path = ingest(normalized, raw_dir)
+    history = append_wiki_source_url(normalized, user_id=user_id)
+    return {"url": normalized, "path": str(path), "urls": history}
+
+
+def set_wiki_sources(
+    *,
+    folders: list[object] | None = None,
+    user_id: str | None = None,
+) -> dict[str, list[str]]:
+    """Persist Wiki Sync folders for the user (URL history preserved)."""
+    doc = load_wiki_sources(user_id)
+    url_history = list(doc.get("AGENT_WIKI_URLS") or [])
+
+    if folders is None:
+        cleaned_folders = get_wiki_source_folders(user_id)
+    else:
+        cleaned_folders = []
+        seen_f: set[str] = set()
+        for item in folders or []:
+            path = _normalize_wiki_source_path(item)
+            if not path or path in seen_f:
+                continue
+            if not os.path.isdir(path):
+                raise ValueError(f"폴더가 없습니다: {path}")
+            seen_f.add(path)
+            cleaned_folders.append(path)
+            if len(cleaned_folders) >= MAX_WIKI_SOURCE_FOLDERS:
+                break
+
+    _write_wiki_sources_doc(
+        {
+            "AGENT_WIKI_SOURCES": cleaned_folders,
+            "AGENT_WIKI_URLS": url_history,
+        },
+        user_id=user_id,
+    )
+    logger.info(
+        "wiki sources saved user=%s folders=%s url_history=%s",
+        sanitize_user_path_segment(user_id) or "default",
+        cleaned_folders,
+        len(url_history),
+    )
+    return {"folders": cleaned_folders, "urls": get_wiki_source_urls(user_id)}
+
+
 GRAPH_PATTERNS = ("pattern1", "pattern2", "pattern3")
 DEFAULT_GRAPH_PATTERN = "pattern1"
 

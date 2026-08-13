@@ -76,6 +76,7 @@ def write_pattern_html(
     title: str,
     subtitle: str | None = None,
     community_labels: dict[int, str] | None = None,
+    query_url: str = "/api/graph/query",
 ) -> str:
     """Write graph HTML using the selected pattern. Returns normalized pattern id."""
     pid = normalize_graph_pattern(pattern)
@@ -83,6 +84,7 @@ def write_pattern_html(
         title=title,
         subtitle=subtitle,
         community_labels=community_labels,
+        query_url=query_url or "/api/graph/query",
     )
     if pid == "pattern2":
         from lib.pattern2_html import to_pattern2_html

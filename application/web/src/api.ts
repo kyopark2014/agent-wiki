@@ -85,6 +85,44 @@ export interface GraphStatus {
   next_eligible_at?: string | null;
 }
 
+export interface WikiStatus {
+  wiki_dir: string;
+  sources?: string[];
+  max_sources?: number;
+  exists: boolean;
+  path: string | null;
+  storage?: string;
+  status: "idle" | "queued" | "running" | "ready" | "error" | "unchanged" | string;
+  pattern?: GraphPattern | string;
+  error?: string | null;
+  message?: string | null;
+  last_success_at?: string | null;
+  pid?: number | null;
+}
+
+export interface WikiSourcesConfig {
+  wiki_dir: string;
+  folders: string[];
+  urls: string[];
+  max_sources: number;
+}
+
+export interface WikiUrlIngestResult {
+  wiki_dir: string;
+  url: string;
+  path: string;
+  urls: string[];
+  folders: string[];
+  max_sources: number;
+}
+
+export interface WikiBrowseResult {
+  path: string;
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+  shortcuts: { name: string; path: string }[];
+}
+
 export type GraphPattern = "pattern1" | "pattern2" | "pattern3";
 
 export interface SessionInfo {
@@ -127,6 +165,31 @@ export const api = {
     request<GraphStatus>(`/api/graph/rebuild${force ? "?force=1" : ""}`, {
       method: "POST",
     }),
+  getWikiStatus: () => request<WikiStatus>("/api/wiki/status"),
+  syncWiki: (full = false) =>
+    request<WikiStatus>(`/api/wiki/sync${full ? "?full=1" : ""}`, {
+      method: "POST",
+    }),
+  setWikiGraphPattern: (pattern: GraphPattern | string) =>
+    request<WikiStatus>("/api/wiki/pattern", {
+      method: "PATCH",
+      body: JSON.stringify({ pattern }),
+    }),
+  getWikiSources: () => request<WikiSourcesConfig>("/api/wiki/sources"),
+  putWikiSources: (body: { folders: string[] }) =>
+    request<WikiSourcesConfig>("/api/wiki/sources", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  ingestWikiUrl: (url: string) =>
+    request<WikiUrlIngestResult>("/api/wiki/urls", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  browseWikiSources: (path?: string) => {
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    return request<WikiBrowseResult>(`/api/wiki/browse${q}`);
+  },
   getConfig: () => request<AppConfig>("/api/config"),
   getAdminDashboard: () => request<DashboardStats>("/api/admin/dashboard"),
   getLlmGateway: () =>

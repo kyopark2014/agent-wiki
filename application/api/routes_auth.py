@@ -261,6 +261,10 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
             utils.ensure_user_graph_dir(user_id)
         except Exception:
             logger.exception("Failed to ensure graph dir for %s", user_id)
+        try:
+            utils.ensure_user_wiki_dir(user_id)
+        except Exception:
+            logger.exception("Failed to ensure wiki dir for %s", user_id)
         _kick_graph_job(user_id)
         logger.info("Google login success: %s (llm_gateway_ready=%s)", user_id, gateway_ready)
         return _session_response(
@@ -284,6 +288,10 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
             utils.ensure_user_graph_dir(local_user_id)
         except Exception:
             logger.exception("Failed to ensure graph dir for %s", local_user_id)
+        try:
+            utils.ensure_user_wiki_dir(local_user_id)
+        except Exception:
+            logger.exception("Failed to ensure wiki dir for %s", local_user_id)
         _kick_graph_job(local_user_id)
         logger.info(
             "Local auth bypass login: %s (llm_gateway_ready=%s)",
@@ -315,6 +323,10 @@ def get_session(request: Request, response: Response) -> SessionResponse | None:
         utils.ensure_user_graph_dir(user_id)
     except Exception:
         logger.exception("Failed to ensure graph dir for %s", user_id)
+    try:
+        utils.ensure_user_wiki_dir(user_id)
+    except Exception:
+        logger.exception("Failed to ensure wiki dir for %s", user_id)
     # Session restore (e.g. after server restart): start extract when fingerprint
     # is missing/stale. ensure_graph_job no-ops when source is unchanged.
     _kick_graph_job(user_id)

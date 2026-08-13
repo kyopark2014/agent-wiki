@@ -161,8 +161,12 @@ def republish_html_from_json(
     *,
     user_id: str | None = None,
     pattern: str | None = None,
+    html_name: str = "graph.html",
+    title: str = "Knowledge Graph",
+    subtitle: str | None = None,
+    query_url: str = "/api/graph/query",
 ) -> Path | None:
-    """Re-render graph.html from existing out/graph.json (no re-extract)."""
+    """Re-render graph HTML from existing out/graph.json (no re-extract)."""
     from graphify.cluster import cluster
 
     from lib.patterns import resolve_graph_pattern, write_pattern_html
@@ -181,23 +185,24 @@ def republish_html_from_json(
         communities.setdefault(int(cid), []).append(nid)
     if not communities:
         communities = cluster(G)
-    html_path = out_dir / "graph.html"
+    html_path = out_dir / html_name
     pid = pattern or resolve_graph_pattern(user_id=user_id)
     write_pattern_html(
         pid,
         G,
         communities,
         html_path,
-        title="Knowledge Graph",
-        subtitle=(
+        title=title,
+        subtitle=subtitle
+        or (
             "지식 그래프 · 노드 클릭 시 출처·관계 상세를 볼 수 있습니다. "
             f"({G.number_of_nodes()} nodes / {G.number_of_edges()} edges)"
         ),
+        query_url=query_url,
     )
     # Pattern switch only rewrites HTML — do not rebuild embeddings here
     # (that blocks PATCH /api/session/settings and hangs the graph UI).
     return html_path
-
 
 def collect_from_graphify_out(
     src: Path,

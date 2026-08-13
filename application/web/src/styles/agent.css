@@ -2056,6 +2056,222 @@ button.config-popover-choice.is-selected {
   width: min(480px, 92vw);
 }
 
+.wiki-configure-modal {
+  width: min(560px, 94vw);
+}
+
+.wiki-configure-help {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.wiki-configure-help code {
+  font-size: 12px;
+}
+
+.wiki-configure-section-label {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wiki-configure-modal .llm-gateway-fields {
+  margin-bottom: 16px;
+}
+
+.wiki-configure-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.wiki-configure-source-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.wiki-configure-source-btn:hover:not(:disabled),
+.wiki-configure-source-btn.is-open {
+  border-color: var(--text-muted);
+  background: var(--menu-hover-mid);
+}
+
+.wiki-configure-source-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.wiki-configure-source-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wiki-configure-source-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.wiki-source-menu {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, calc(100vh - 24px));
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-primary, #111);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.wiki-source-menu-header {
+  margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wiki-source-menu-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.wiki-source-menu-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wiki-source-menu-chip:hover {
+  background: var(--menu-hover-mid);
+}
+
+.wiki-source-menu-pathrow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wiki-source-menu-pathrow input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.wiki-source-menu-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 220px;
+  overflow: auto;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.wiki-source-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wiki-source-menu-item:last-child {
+  border-bottom: 0;
+}
+
+.wiki-source-menu-item:hover {
+  background: var(--menu-hover-mid);
+}
+
+.wiki-source-menu-empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.wiki-source-menu-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wiki-configure-url-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wiki-configure-url-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.wiki-configure-url-add {
+  flex-shrink: 0;
+  margin-bottom: 1px;
+}
+
+.wiki-configure-url-history {
+  margin-bottom: 16px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.wiki-configure-url-history ul {
+  margin: 0;
+  padding: 0 0 0 18px;
+}
+
+.wiki-configure-url-history li {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.wiki-configure-url-history a {
+  color: var(--text-secondary);
+}
+
 .llm-gateway-fields {
   display: flex;
   flex-direction: column;

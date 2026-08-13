@@ -108,6 +108,7 @@ def to_pattern3_html(
     title: str,
     subtitle: str | None = None,
     community_labels: dict[int, str] | None = None,
+    query_url: str = "/api/graph/query",
 ) -> None:
     """Write Neo4j Browser-style holistic overview HTML."""
     community_labels = community_labels or _infer_community_labels(G, communities)
@@ -184,7 +185,7 @@ def to_pattern3_html(
         "legend": legend_items,
     }
 
-    html_doc = _render_template(payload)
+    html_doc = _render_template(payload, query_url=query_url or "/api/graph/query")
     dest = Path(output_path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".tmp")
@@ -192,7 +193,7 @@ def to_pattern3_html(
     os.replace(tmp, dest)
 
 
-def _render_template(payload: dict[str, Any]) -> str:
+def _render_template(payload: dict[str, Any], *, query_url: str = "/api/graph/query") -> str:
     title = html.escape(payload["title"])
     data_json = json.dumps(
         {
@@ -723,4 +724,5 @@ function selectPattern(pattern) {{
         doc.replace("<<<ASK_PANEL_CSS>>>", ASK_PANEL_CSS)
         .replace("<<<ASK_PANEL_HTML>>>", ASK_PANEL_HTML)
         .replace("<<<ASK_PANEL_JS>>>", ASK_PANEL_JS)
+        .replace("<<<GRAPH_QUERY_URL>>>", query_url or "/api/graph/query")
     )
