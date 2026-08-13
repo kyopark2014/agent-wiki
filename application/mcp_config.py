@@ -279,7 +279,21 @@ def load_config(mcp_type):
                 }
             }
         }
-    
+
+    elif mcp_type == "wiki":
+        return {
+            "mcpServers": {
+                "wiki": {
+                    "command": "python",
+                    "args": [f"{workingDir}/mcp_server_wiki.py"],
+                    "env": {
+                        "PYTHONPATH": workingDir,
+                        # AGENTCORE_USER_ID is injected at runtime in chat.create_agent()
+                    },
+                }
+            }
+        }
+
     elif mcp_type == "outlook":
         secret_name = f"outlook-mcp-user-email"
         secret_value = json.loads(get_secret_value(secret_name))

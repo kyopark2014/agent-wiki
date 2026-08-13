@@ -42,7 +42,7 @@ OpenAI 공동 창업자이자 Tesla 전 AI 리드인 **Andrej Karpathy**는 구�
 6. [Wiki Graph](#wiki-graph) — `raw` / Sources → Wiki Sync
 7. [Graph](#graph) — 시각화 패턴 · 장단점
 8. [검색하는 방법](#검색하는-방법) — `/graphify` CLI
-9. [문서검색](#문서검색) — 앱 내 Ask 패널
+9. [Wiki 검색](#wiki-검색) — 앱 내 Ask 패널 · Agent MCP
 10. [실행 방법](#실행-방법)
 11. [실행 결과](#실행-결과)
 12. [Reference](#reference)
@@ -157,10 +157,11 @@ flowchart TB
 | 화면 / 기능 | 설명 |
 |-------------|------|
 | Task Chat | 태스크별 세션 + SSE 스트리밍 (`chat.run_agent`). 핀·이름 변경·삭제 지원 |
-| Skill / MCP | 사이드바에서 Skill·MCP 선택 (기본 예: graphify, websearch, web_fetch) |
+| Skill / MCP | 사이드바에서 Skill·MCP 선택 (기본 예: graphify, websearch, web_fetch, **wiki**, **graph memory**) |
 | 파일 업로드 | 이미지·문서 첨부 후 Agent에 전달 |
-| Knowledge Graph | 브랜드 클릭 → `KnowledgeGraphModal` → `/api/graph` |
-| Settings | Knowledge Graph on/off, `graph_pattern` 등 사용자 설정 |
+| Knowledge Graph | Settings → **Knowledge** → Graph, 또는 브랜드 클릭 → `KnowledgeGraphModal` → `/api/graph` |
+| Wiki Graph | Settings → **Wiki** → Sync / Graph / Configure |
+| Settings | Knowledge On/Off·Sync, Wiki Sync, `graph_pattern` 등 사용자 설정 |
 
 Agent는 도구(MCP)·Skill 지시문을 받아 ReAct 루프로 동작합니다.
 
@@ -188,9 +189,10 @@ agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장
 | 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
 | 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
 | 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
-| API | `GET /api/graph` | `GET /api/wiki/graph` |
-| 갱신 | `run_pipeline` / `POST /api/graph/rebuild` | Settings → Wiki → **Sync** |
-| 보기 | 사이드바 브랜드 **Agent wiki (user)** | Settings → Wiki → **Graph** |
+| API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
+| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
+| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
+| Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
 
 ---
 
@@ -384,6 +386,8 @@ Configure에서 URL을 **추가하는 순간** `graphify.ingest`가 HTTP(S)로 �
 
 시각화 패턴·문서검색은 아래 [Graph](#graph)를 참고하세요.
 
+채팅 Agent에서 Wiki 코퍼스를 검색하려면 Settings → MCP에서 **`wiki`** 를 켭니다. 도구 `recall_wiki`는 `POST /api/wiki/query`와 같은 `query_user_graph()` 경로를 사용합니다. 자세한 내용은 [Wiki 검색 — Agent MCP](#agent-mcp-graph-memory--wiki)를 보세요.
+
 ---
 
 ## Graph
@@ -403,7 +407,9 @@ Sidebar "Agent wiki (user)" 클릭
 | `GET /api/graph` | 사용자 그래프 HTML 인라인 표시 |
 | `GET /api/graph/status` | 존재 여부 · job 상태 · enabled |
 | `POST /api/graph/rebuild` | 백그라운드 파이프라인 enqueue |
-| `POST /api/graph/query` | 문서검색 (BFS/DFS + excerpt) |
+| `POST /api/graph/query` | Knowledge Graph 문서검색 (BFS/DFS + excerpt) |
+| `GET /api/wiki/graph` | Wiki Graph HTML |
+| `POST /api/wiki/query` | Wiki Graph 문서검색 (동일 엔진) |
 
 그래프가 아직 없으면 안내 HTML이 뜨고, 추출이 끝나면 모달을 다시 열면 됩니다. 구버전 HTML에 문서검색 UI가 없으면 서버가 `graph.json`으로부터 republish를 시도합니다.
 
@@ -488,7 +494,7 @@ Holistic view의 graph 화면입니다.
 
 채팅에서 graphify **Skill**이 활성화된 경우, 에이전트에게 `/graphify …` 형태의 요청으로 그래프를 질의할 수 있습니다. (폴더 추출·CLI와 동일한 개념의 query / path / explain)
 
-앱 Knowledge Graph HTML의 **문서검색**과는 UI가 다릅니다. 앱 내 검색은 [문서검색](#문서검색)을 보세요.
+앱 Knowledge Graph HTML의 **문서검색**과는 UI가 다릅니다. 앱 내 검색은 [Wiki 검색](#wiki-검색)을 보세요.
 
 ### 1️⃣ `/graphify query` - 질문으로 검색
 
@@ -552,12 +558,12 @@ brew install --cask libreoffice
 
 ---
 
-## 문서검색
+## Wiki 검색
 
-그래프 HTML의 **문서검색**은 좌상단 `Search entities...` 입력에서 Enter로 실행됩니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 같은 카드에 보여 줍니다. 기본은 `graph.json` + 원문 파일이며, 시작 노드 선정에 **임베딩 hybrid**를 씁니다(벡터 DB 불필요 — `out/node_embeddings.json` 사이드카).
+그래프 HTML의 **Wiki 검색**은 좌상단 `Search entities...` 입력에서 Enter로 실행됩니다. 질문 → 관련 노드 탐색 → **소스 파일 본문 excerpt**까지 같은 카드에 보여 줍니다. Knowledge Graph는 `POST /api/graph/query`, Wiki Graph는 `POST /api/wiki/query`이며 둘 다 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 사용합니다. 기본은 `graph.json` + 원문 파일이며, 시작 노드 선정에 **임베딩 hybrid**를 씁니다(벡터 DB 불필요 — `node_embeddings.json` 사이드카).
 
-1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. 좌상단 검색 Enter → `POST /api/graph/query` (`credentials: same-origin`). 검색 시 범례는 자동으로 숨겨집니다.
-2. **API** — [routes_graph.py](./application/api/routes_graph.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 [graph_query.py](./application/graph_query.py)의 `query_user_graph()`를 호출합니다.
+1. **UI** — 세 패턴 HTML에 [ask_panel.py](./graph/lib/ask_panel.py)의 CSS/HTML/JS가 주입됩니다. 좌상단 검색 Enter → Knowledge는 `POST /api/graph/query`, Wiki는 `POST /api/wiki/query` (`credentials: same-origin`). 검색 시 범례는 자동으로 숨겨집니다.
+2. **API** — [routes_graph.py](./application/api/routes_graph.py) / [routes_wiki.py](./application/api/routes_wiki.py)가 세션 사용자 `graph.json` 경로를 정한 뒤 `query_user_graph()`를 호출합니다.
 3. **시작 노드 매칭** (lexical ∪ embedding)
    - 질문을 토큰화(영문 ≥3자, CJK ≥2자).
    - 노드 **label** 부분 일치로 상위 후보 선정.
@@ -617,6 +623,25 @@ CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 �
 결과적으로 Corpus로부터 관련 문서를 가져올 수 있습니다.
 
 <img width="368" height="451" alt="image" src="https://github.com/user-attachments/assets/00f5d8cf-c0ac-427f-b1e5-6ace6ba1daca" />
+
+### Agent MCP (graph memory · wiki)
+
+그래프 HTML의 **문서검색**과 같은 엔진(`query_user_graph`)을 채팅 Agent가 MCP 도구로도 호출할 수 있습니다. Settings → **MCP**에서 서버를 켠 뒤, Agent가 관련 질문에 도구를 사용합니다.
+
+| MCP (`mcp.list`) | 도구 | 대상 그래프 | 동일 HTTP API | 구현 |
+|------------------|------|-------------|---------------|------|
+| **`graph memory`** | `recall_graph_memory(question, mode?, budget?)` | Knowledge Graph (`{user}/graph/out/graph.json`) | `POST /api/graph/query` | `mcp_server_graph_memory.py` → `mcp_graph_memory.py` |
+| **`wiki`** | `recall_wiki(question, mode?, budget?)` | Wiki Graph (`{user}/wiki/graphify-out/graph.json`) | `POST /api/wiki/query` | `mcp_server_wiki.py` → `mcp_wiki.py` |
+
+공통 동작:
+
+- `mode`: `"bfs"`(기본) 또는 `"dfs"`, `budget`: soft size(기본 2000)
+- 성공 시 `{"text": [{"type":"excerpt","source":"...","text":"...","related_topics":[...]}, ...]}` (최대 12 excerpt)
+- 사용자별 경로는 채팅 시 `AGENTCORE_USER_ID`로 MCP 프로세스에 주입 (`chat.py`)
+- Knowledge Graph가 Settings에서 Off이면 `graph memory`는 검색을 거부합니다. Wiki는 Sync로 `graph.json`이 생긴 뒤에만 검색됩니다
+- Knowledge Graph가 On이면 채팅 시 **`graph memory`는 자동 첨부**됩니다. **`wiki`는 MCP 목록에서 직접 선택**합니다
+
+`wiki` 등록: `application/mcp.list` + `mcp_config.py` (`"wiki"` → `mcp_server_wiki.py`).
 
 ---
 

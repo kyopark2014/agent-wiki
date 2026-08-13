@@ -2025,6 +2025,7 @@ async def create_agent(
     for server_name in (
         "memory",
         "graph memory",
+        "wiki",
         "kb_retriever",
         "kb-retriever",
         "imageGeneration",
