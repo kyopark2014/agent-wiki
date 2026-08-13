@@ -28,13 +28,14 @@ import {
   CloseIcon,
 } from "./SidebarIcons";
 
-type DrawerKind = "skill" | "mcp" | "model" | "appearance" | "wiki" | null;
+type DrawerKind = "skill" | "mcp" | "model" | "appearance" | "wiki" | "knowledge" | null;
 
 const LLM_GATEWAY_NOT_CONFIGURED =
   "LLM Gateway가 설정되어 있지 않아 활성화할 수 없습니다. 관리자에게 설정을 요청하세요.";
 
 const THEME_OPTIONS = ["Light", "Dark"] as const;
 const WIKI_OPTIONS = ["Sync", "Graph", "Configure"] as const;
+const KNOWLEDGE_ACTIONS = ["Sync", "Graph"] as const;
 
 function themeToLabel(theme: Theme): string {
   return theme === "light" ? "Light" : "Dark";
@@ -90,6 +91,7 @@ export function Sidebar({
   const modelBtnRef = useRef<HTMLButtonElement>(null);
   const appearanceBtnRef = useRef<HTMLButtonElement>(null);
   const wikiBtnRef = useRef<HTMLButtonElement>(null);
+  const knowledgeBtnRef = useRef<HTMLButtonElement>(null);
   const settingsSectionRef = useRef<HTMLDivElement>(null);
   const [llmGatewayOpen, setLlmGatewayOpen] = useState(false);
   const [knowledgeGraphOpen, setKnowledgeGraphOpen] = useState(false);
@@ -97,6 +99,8 @@ export function Sidebar({
   const [wikiConfigureOpen, setWikiConfigureOpen] = useState(false);
   const [wikiSyncBusy, setWikiSyncBusy] = useState(false);
   const [wikiSyncMessage, setWikiSyncMessage] = useState<string | null>(null);
+  const [knowledgeSyncBusy, setKnowledgeSyncBusy] = useState(false);
+  const [knowledgeSyncMessage, setKnowledgeSyncMessage] = useState<string | null>(null);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const { theme, setTheme } = useTheme();
   const skills = activeTask?.skills ?? config?.default_skills ?? [];
@@ -188,6 +192,54 @@ export function Sidebar({
     }
   }
 
+  async function handleKnowledgeAction(choice: string) {
+    if (choice === "On" || choice === "Off") {
+      // Label shows current state; click toggles the opposite.
+      const enabled = choice === "Off";
+      try {
+        await onPatchKnowledgeGraphEnabled?.(enabled);
+      } finally {
+        handleSettingApplied();
+      }
+      return;
+    }
+    if (choice === "Graph") {
+      setKnowledgeGraphOpen(true);
+      handleSettingApplied();
+      return;
+    }
+    if (choice !== "Sync") return;
+    setKnowledgeSyncBusy(true);
+    setKnowledgeSyncMessage(null);
+    try {
+      const result = await api.rebuildGraph(false);
+      const status = result.status;
+      if (status === "error") {
+        setKnowledgeSyncBusy(false);
+        setKnowledgeSyncMessage(result.error || "Knowledge 동기화에 실패했습니다.");
+      } else if (status === "skipped_cooldown") {
+        setKnowledgeSyncBusy(false);
+        setKnowledgeSyncMessage("잠시 후 다시 동기화할 수 있습니다.");
+      } else if (status === "disabled") {
+        setKnowledgeSyncBusy(false);
+        setKnowledgeSyncMessage("Knowledge가 Off 상태입니다. On으로 켠 뒤 Sync 하세요.");
+      } else if (status === "queued" || status === "running") {
+        setKnowledgeSyncBusy(true);
+        setKnowledgeSyncMessage("Knowledge 동기화를 백그라운드에서 실행 중입니다.");
+      } else {
+        setKnowledgeSyncBusy(false);
+        setKnowledgeSyncMessage("Knowledge 동기화가 완료되었습니다.");
+      }
+    } catch (err) {
+      setKnowledgeSyncBusy(false);
+      setKnowledgeSyncMessage(
+        err instanceof Error ? err.message : "Knowledge 동기화에 실패했습니다.",
+      );
+    } finally {
+      handleSettingApplied();
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -227,6 +279,43 @@ export function Sidebar({
       if (timer) clearTimeout(timer);
     };
   }, [wikiSyncBusy]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function pollKnowledgeSync() {
+      try {
+        const next = await api.getGraphStatus();
+        if (cancelled) return;
+        const busy = next.status === "queued" || next.status === "running";
+        setKnowledgeSyncBusy(busy);
+        if (busy) {
+          setKnowledgeSyncMessage(
+            "Knowledge 동기화를 백그라운드에서 실행 중입니다.",
+          );
+          timer = setTimeout(pollKnowledgeSync, 2500);
+          return;
+        }
+        if (next.status === "ready") {
+          setKnowledgeSyncMessage("Knowledge 동기화가 완료되었습니다.");
+        } else if (next.status === "error") {
+          setKnowledgeSyncMessage(next.error || "Knowledge 동기화에 실패했습니다.");
+        }
+      } catch {
+        if (cancelled) return;
+        if (knowledgeSyncBusy) {
+          timer = setTimeout(pollKnowledgeSync, 4000);
+        }
+      }
+    }
+
+    void pollKnowledgeSync();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [knowledgeSyncBusy]);
 
   function renderTask(task: Task, hidePinBadge = false) {
     return (
@@ -430,6 +519,18 @@ export function Sidebar({
                 <WikiIcon className="sidebar-icon" />
                 <span>{wikiSyncBusy ? "Wiki (Syncing…)" : "Wiki"}</span>
               </button>
+              <button
+                ref={knowledgeBtnRef}
+                type="button"
+                className={`sidebar-menu-btn${drawer === "knowledge" || knowledgeSyncBusy ? " is-active" : ""}`}
+                aria-expanded={drawer === "knowledge"}
+                aria-haspopup="dialog"
+                title={knowledgeSyncMessage ?? "Knowledge"}
+                onClick={() => toggleDrawer("knowledge")}
+              >
+                <KnowledgeGraphIcon className="sidebar-icon" />
+                <span>{knowledgeSyncBusy ? "Knowledge (Syncing…)" : "Knowledge"}</span>
+              </button>
               <label className="sidebar-menu-btn settings-toggle">
                 <GuardrailIcon className="sidebar-icon" />
                 <span>Guardrail</span>
@@ -459,24 +560,6 @@ export function Sidebar({
                       memory_enabled: e.target.checked,
                     });
                     handleSettingApplied();
-                  }}
-                />
-              </label>
-              <label className="sidebar-menu-btn settings-toggle">
-                <KnowledgeGraphIcon className="sidebar-icon" />
-                <span>Knowledge Graph</span>
-                <input
-                  type="checkbox"
-                  checked={knowledgeGraphEnabled}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    void (async () => {
-                      try {
-                        await onPatchKnowledgeGraphEnabled?.(enabled);
-                      } finally {
-                        handleSettingApplied();
-                      }
-                    })();
                   }}
                 />
               </label>
@@ -566,8 +649,24 @@ export function Sidebar({
           onClose={handleDrawerClose}
         />
       )}
+      {drawer === "knowledge" && (
+        <ConfigDrawer
+          title="Knowledge"
+          options={[
+            ...KNOWLEDGE_ACTIONS,
+            knowledgeGraphEnabled ? "On" : "Off",
+          ]}
+          selected={[]}
+          mode="single"
+          anchorEl={knowledgeBtnRef.current}
+          onChange={(next) => {
+            if (next[0]) void handleKnowledgeAction(next[0]);
+          }}
+          onClose={handleDrawerClose}
+        />
+      )}
 
-      {knowledgeGraphOpen && knowledgeGraphEnabled && (
+      {knowledgeGraphOpen && (
         <KnowledgeGraphModal
           userId={userId}
           title={brandTitle}
