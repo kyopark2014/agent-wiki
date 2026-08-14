@@ -31,7 +31,6 @@ function shortPath(path: string): string {
 export function WikiConfigureModal({ onClose }: Props) {
   const [sourceSlots, setSourceSlots] = useState<string[]>(emptySlots());
   const [urlInput, setUrlInput] = useState("");
-  const [urlHistory, setUrlHistory] = useState<string[]>([]);
   const [pendingDocs, setPendingDocs] = useState<File[]>([]);
   const [wikiDir, setWikiDir] = useState("");
   const [loading, setLoading] = useState(true);
@@ -53,7 +52,6 @@ export function WikiConfigureModal({ onClose }: Props) {
         if (cancelled) return;
         setWikiDir(data.wiki_dir || "");
         setSourceSlots(emptySlots(data.folders || [], data.max_sources || SOURCE_SLOTS));
-        setUrlHistory(data.urls || []);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -102,7 +100,6 @@ export function WikiConfigureModal({ onClose }: Props) {
       const folders = sourceSlots.map((s) => s.trim()).filter(Boolean);
       const saved = await api.putWikiSources({ folders });
       setSourceSlots(emptySlots(saved.folders || [], saved.max_sources || SOURCE_SLOTS));
-      setUrlHistory(saved.urls || []);
       if (saved.folders.length > 0) {
         messages.push(`Source ${saved.folders.length}개 저장`);
       } else {
@@ -155,7 +152,6 @@ export function WikiConfigureModal({ onClose }: Props) {
     try {
       const result = await api.ingestWikiUrl(url);
       setUrlInput("");
-      setUrlHistory(result.urls || []);
       setSuccess(
         `URL을 ${result.path || `${wikiDir || "wiki"}/raw`}에 저장했습니다.`,
       );
@@ -179,8 +175,6 @@ export function WikiConfigureModal({ onClose }: Props) {
     applySourcePath(index, "");
   }
 
-  const historyNewestFirst = [...urlHistory].reverse();
-
   return createPortal(
     <div
       className="modal-overlay"
@@ -200,13 +194,6 @@ export function WikiConfigureModal({ onClose }: Props) {
     >
       <div className="modal wiki-configure-modal">
         <h2 id="wiki-configure-title">Wiki Configure</h2>
-        <p className="wiki-configure-help">
-          Sync Source는 최대 {SOURCE_SLOTS}개까지 지정할 수 있습니다.{" "}
-          <strong>문서 추가</strong>로 고른 파일은 <strong>저장</strong> 시{" "}
-          <code>{wikiDir || ".session_storage/{user}/wiki"}/raw</code>에
-          복사됩니다. Sync는 Sources와 raw를 함께 추출합니다. URL은 입력 즉시
-          raw에 저장됩니다.
-        </p>
         {loading ? (
           <p className="llm-gateway-muted">불러오는 중…</p>
         ) : (
@@ -304,11 +291,11 @@ export function WikiConfigureModal({ onClose }: Props) {
             <div className="wiki-configure-section-label">URL</div>
             <div className="wiki-configure-url-row">
               <label className="llm-gateway-field wiki-configure-url-field">
-                <span>문서 URL</span>
                 <input
                   type="url"
                   value={urlInput}
                   placeholder="예: https://example.com/article"
+                  aria-label="URL"
                   disabled={busy || addingUrl}
                   autoComplete="off"
                   onChange={(e) => setUrlInput(e.target.value)}
@@ -329,20 +316,6 @@ export function WikiConfigureModal({ onClose }: Props) {
                 {addingUrl ? "저장 중…" : "추가"}
               </button>
             </div>
-            {historyNewestFirst.length > 0 ? (
-              <div className="wiki-configure-url-history">
-                <div className="wiki-configure-section-label">URL 이력</div>
-                <ul>
-                  {historyNewestFirst.map((url, index) => (
-                    <li key={`${url}-${urlHistory.length - index}`}>
-                      <a href={url} target="_blank" rel="noreferrer">
-                        {url}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
           </>
         )}
         {error ? (

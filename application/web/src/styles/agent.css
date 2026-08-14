@@ -2060,17 +2060,6 @@ button.config-popover-choice.is-selected {
   width: min(560px, 94vw);
 }
 
-.wiki-configure-help {
-  margin: 0 0 14px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  line-height: 1.45;
-}
-
-.wiki-configure-help code {
-  font-size: 12px;
-}
-
 .wiki-configure-section-label {
   margin: 4px 0 8px;
   font-size: 11px;
@@ -2332,28 +2321,6 @@ button.config-popover-choice.is-selected {
 .wiki-configure-url-add {
   flex-shrink: 0;
   margin-bottom: 1px;
-}
-
-.wiki-configure-url-history {
-  margin-bottom: 16px;
-  max-height: 160px;
-  overflow: auto;
-}
-
-.wiki-configure-url-history ul {
-  margin: 0;
-  padding: 0 0 0 18px;
-}
-
-.wiki-configure-url-history li {
-  margin: 0 0 6px;
-  font-size: 12px;
-  line-height: 1.4;
-  word-break: break-all;
-}
-
-.wiki-configure-url-history a {
-  color: var(--text-secondary);
 }
 
 .llm-gateway-fields {
