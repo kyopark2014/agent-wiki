@@ -757,17 +757,13 @@ uvicorn application.server:app --host 0.0.0.0 --port 8501
 
 ## 실행 결과
 
-아래와 같이 `/graphify contents/`를 하면 contents 폴더의 파일들을 가지고 graph를 생성합니다.
+아래와 같이 Wiki MCP를 enable 합니다.
 
-<img width="723" height="510" alt="image" src="https://github.com/user-attachments/assets/366be416-3179-4072-bb2e-981b7b4e50ea" />
+<img width="251" height="286" alt="image" src="https://github.com/user-attachments/assets/65f50586-7531-460a-8b63-5a33adfdd9ba" />
 
-이후 `/graphify query RAG를 LLM Wiki로 전환하는 방법은?`처럼 질문하면 그래프를 조회합니다.
+이후 "wiki로 T-Box에 대해 조사하세요."라고 입력후 결과를 확인합니다. 
 
-<img width="728" height="667" alt="image" src="https://github.com/user-attachments/assets/b99ba277-445c-47ee-80a6-6a20d4b1dbd9" />
-
-최종적으로 아래와 같은 결과를 얻을 수 있습니다.
-
-<img width="676" height="762" alt="image" src="https://github.com/user-attachments/assets/d0fea24b-e907-4c60-a1f0-4cee72c45a23" />
+<img width="921" height="760" alt="image" src="https://github.com/user-attachments/assets/9ac17473-f301-4e86-9599-a6ede97043ca" />
 
 ---
 
