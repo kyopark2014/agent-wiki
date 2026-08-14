@@ -321,8 +321,18 @@ def _run_pipeline(user_id: str, force: bool = False) -> None:
         logger.exception("Graph pipeline failed for user=%s", user_id)
 
 
-def republish_graph_html(user_id: str, *, pattern: str | None = None) -> bool:
-    """Re-render out/graph.html from existing graph.json using the given pattern."""
+def republish_graph_html(
+    user_id: str,
+    *,
+    pattern: str | None = None,
+    sync_runtime: bool = False,  # reserved; wiki mirrors elsewhere if needed
+) -> bool:
+    """Re-render out/graph.html from existing graph.json using the given pattern.
+
+    Pattern switches only change the view HTML; full runtime mirroring is skipped
+    by default. Pass ``sync_runtime=True`` only when callers need AgentCore storage
+    updated (pipeline success paths already mirror when configured).
+    """
     user_id = (user_id or "").strip()
     if not user_id:
         return False
@@ -343,4 +353,6 @@ def republish_graph_html(user_id: str, *, pattern: str | None = None) -> bool:
         logger.info("No graph.json to republish for %s (pattern=%s)", user_id, pid)
         return False
     logger.info("Republished graph HTML for %s pattern=%s → %s", user_id, pid, written)
+    if sync_runtime:
+        logger.debug("sync_runtime requested but no graph→runtime mirror in this app")
     return True

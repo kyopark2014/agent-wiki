@@ -279,7 +279,7 @@ def _render_template(payload: dict[str, Any], *, query_url: str = "/api/graph/qu
     position: absolute;
     left: 18px;
     bottom: 18px;
-    z-index: 4;
+    z-index: 20;
     width: min(280px, calc(100vw - 36px));
     max-height: min(52vh, 420px);
     display: flex;
@@ -359,7 +359,7 @@ def _render_template(payload: dict[str, Any], *, query_url: str = "/api/graph/qu
     position: absolute;
     top: 18px;
     right: 18px;
-    z-index: 4;
+    z-index: 20;
     width: min(300px, calc(100vw - 36px));
     background: rgba(28, 33, 44, 0.96);
     border: 1px solid rgba(255,255,255,0.08);
@@ -403,11 +403,12 @@ def _render_template(payload: dict[str, Any], *, query_url: str = "/api/graph/qu
     position: absolute;
     right: 18px;
     bottom: 18px;
-    z-index: 4;
+    z-index: 20;
     display: flex;
     flex-direction: column;
     gap: 8px;
     align-items: flex-end;
+    pointer-events: auto;
   }}
   .controls-row {{
     display: flex;
@@ -482,9 +483,11 @@ def _render_template(payload: dict[str, Any], *, query_url: str = "/api/graph/qu
       <button type="button" class="ctrl-btn pattern-btn active" data-pattern="pattern3" onclick="selectPattern('pattern3')" title="Holistic View (현재)">Holistic View</button>
     </div>
     <div class="controls-row">
-      <button class="ctrl-btn" onclick="network.fit({{ animation: {{ duration: 400 }} }})">전체 보기</button>
-      <button class="ctrl-btn" onclick="stabilize()">레이아웃 재정렬</button>
-      <button class="ctrl-btn" onclick="filterGroup(null)">필터 해제</button>
+      <button type="button" class="ctrl-btn" id="fit-view-btn" onclick="fitView()">전체 보기</button>
+      <button type="button" class="ctrl-btn" onclick="stabilize()">레이아웃 재정렬</button>
+      <button type="button" class="ctrl-btn" id="legend-toggle-btn" onclick="toggleLegend()">범례 숨기기</button>
+      <button type="button" class="ctrl-btn" id="isolate-toggle-btn" onclick="toggleIsolates()" title="연결(edge)이 없는 노드 표시/숨기기">고립 숨기기</button>
+      <button type="button" class="ctrl-btn" onclick="filterGroup(null)">필터 해제</button>
     </div>
   </div>
 </div>
@@ -496,6 +499,9 @@ const rawEdges = DATA.rawEdges;
 const nodeDescriptions = DATA.descriptions;
 const legend = DATA.legend;
 let activeGroup = null;
+let legendHidden = false;
+let hideIsolates = false;
+const isolateCount = rawNodes.filter(n => (n.degree || 0) === 0).length;
 
 function darkenColor(hex, factor) {{
   const r = Math.floor(parseInt(hex.slice(1,3), 16) * (1-factor));
@@ -514,11 +520,139 @@ function hideDetail() {{
   document.getElementById('node-detail').style.display = 'none';
 }}
 
+function syncLegendToggleLabel() {{
+  const btn = document.getElementById('legend-toggle-btn');
+  if (btn) btn.textContent = legendHidden ? '범례 보이기' : '범례 숨기기';
+}}
+
 function toggleLegend(force) {{
   const panel = document.querySelector('.legend-panel');
   if (!panel) return;
-  if (typeof force === 'boolean') panel.classList.toggle('is-hidden', force);
-  else panel.classList.toggle('is-hidden');
+  legendHidden = typeof force === 'boolean' ? force : !legendHidden;
+  panel.classList.toggle('is-hidden', legendHidden);
+  syncLegendToggleLabel();
+}}
+
+function syncIsolateToggleLabel() {{
+  const btn = document.getElementById('isolate-toggle-btn');
+  if (!btn) return;
+  if (isolateCount === 0) {{
+    btn.disabled = true;
+    btn.classList.remove('active');
+    btn.textContent = '고립 없음';
+    btn.title = '연결 없는 노드가 없습니다';
+    return;
+  }}
+  btn.disabled = false;
+  btn.classList.toggle('active', hideIsolates);
+  btn.textContent = hideIsolates
+    ? `고립 보이기 (${{isolateCount}})`
+    : `고립 숨기기 (${{isolateCount}})`;
+  btn.title = hideIsolates
+    ? '연결 없는 노드를 다시 표시'
+    : '연결(edge)이 없는 노드 숨기기';
+}}
+
+function applyNodeVisibility() {{
+  if (typeof networkData === 'undefined' || !networkData) return;
+  networkData.nodes.update(rawNodes.map(n => {{
+    const isolated = (n.degree || 0) === 0;
+    const hidden = hideIsolates && isolated;
+    let opacity = 1;
+    if (!hidden && activeGroup) {{
+      opacity = n.group === activeGroup ? 1 : 0.12;
+    }}
+    return {{ id: n.id, hidden: !!hidden, opacity: hidden ? 0 : opacity }};
+  }}));
+}}
+
+function toggleIsolates() {{
+  if (isolateCount === 0) return;
+  hideIsolates = !hideIsolates;
+  syncIsolateToggleLabel();
+  applyNodeVisibility();
+  if (hideIsolates && network) {{
+    stabilize();
+  }} else if (network) {{
+    try {{ network.fit({{ animation: {{ duration: 400 }} }}); }} catch (e) {{}}
+  }}
+}}
+
+const NODE_COUNT = rawNodes.length;
+const SMALL_GRAPH = NODE_COUNT < 120;
+const SPARSE_GRAPH = isolateCount / Math.max(NODE_COUNT, 1) >= 0.2;
+const STAB_ITERS = SMALL_GRAPH ? 220 : Math.min(480, 200 + Math.floor(NODE_COUNT / 2));
+const LIVE_SETTLE_MS = SPARSE_GRAPH ? 5500 : (SMALL_GRAPH ? 4500 : 5000);
+let network = null;
+let settleGen = 0;
+let settleTimer = null;
+
+const PHYSICS_BASE = {{
+  enabled: true,
+  solver: 'forceAtlas2Based',
+  forceAtlas2Based: {{
+    gravitationalConstant: -55,
+    centralGravity: 0.008,
+    springLength: 160,
+    springConstant: 0.05,
+    damping: 0.45,
+    avoidOverlap: 0.9
+  }},
+  stabilization: {{
+    enabled: false,
+    iterations: STAB_ITERS,
+    updateInterval: 25,
+    fit: false
+  }}
+}};
+
+
+function stopPhysics() {{
+  if (!network) return;
+  try {{ network.stopSimulation(); }} catch (e) {{}}
+  network.setOptions({{
+    physics: {{ enabled: false, stabilization: {{ enabled: false }} }}
+  }});
+}}
+
+function whenCanvasReady(fn) {{
+  let tries = 0;
+  const tick = () => {{
+    const el = document.getElementById('mynetwork');
+    const w = el ? el.clientWidth : 0;
+    const h = el ? el.clientHeight : 0;
+    if (w >= 60 && h >= 60) {{
+      fn();
+      return;
+    }}
+    if (tries++ < 80) {{
+      setTimeout(tick, 40);
+      return;
+    }}
+    fn();
+  }};
+  requestAnimationFrame(tick);
+}}
+
+function fitView() {{
+  if (!network) return;
+  cancelSettle();
+  stopPhysics();
+  const doFit = () => {{
+    try {{
+      network.redraw();
+      network.fit({{
+        animation: {{ duration: 350, easingFunction: 'easeInOutQuad' }},
+        padding: 48
+      }});
+      const scale = network.getScale();
+      if (!Number.isFinite(scale) || scale < 0.05) {{
+        network.moveTo({{ scale: 0.35, position: {{ x: 0, y: 0 }}, animation: false }});
+      }}
+    }} catch (e) {{}}
+  }};
+  doFit();
+  whenCanvasReady(doFit);
 }}
 
 function markLegendActive(group) {{
@@ -598,6 +732,39 @@ const visEdges = rawEdges.map((e, i) => ({{
   smooth: {{ type: 'dynamic', roundness: 0.3 }},
   title: e.label + (e.confidence ? ` [${{e.confidence}}]` : '')
 }}));
+if (true) {{
+  // Always seed randomly (community ring only for small graphs previously left
+  // large graphs on vis' default circle, which then froze after short stabilize).
+  const groups = {{}};
+  visNodes.forEach((n) => {{
+    const g = n.group == null ? 0 : n.group;
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(n);
+  }});
+  const keys = Object.keys(groups);
+  const R = Math.max(420, Math.sqrt(visNodes.length) * 70);
+  if (SMALL_GRAPH && keys.length > 1) {{
+    keys.forEach((g, gi) => {{
+      const angle = (2 * Math.PI * gi) / Math.max(keys.length, 1);
+      const cx = Math.cos(angle) * R;
+      const cy = Math.sin(angle) * R;
+      const members = groups[g];
+      const local = Math.max(80, Math.sqrt(members.length) * 28);
+      members.forEach((n, i) => {{
+        const a = (2 * Math.PI * i) / Math.max(members.length, 1);
+        const r = local * (0.25 + 0.75 * ((i % 7) / 7));
+        n.x = cx + Math.cos(a) * r + (Math.random() - 0.5) * 40;
+        n.y = cy + Math.sin(a) * r + (Math.random() - 0.5) * 40;
+      }});
+    }});
+  }} else {{
+    const spread = Math.max(520, Math.sqrt(visNodes.length) * 95);
+    visNodes.forEach((n) => {{
+      n.x = (Math.random() - 0.5) * spread * 2;
+      n.y = (Math.random() - 0.5) * spread * 2;
+    }});
+  }}
+}}
 
 const container = document.getElementById('mynetwork');
 const networkData = {{
@@ -606,6 +773,7 @@ const networkData = {{
 }};
 
 const options = {{
+  groups: {{ useDefaultGroups: false }},
   nodes: {{
     shape: 'ellipse',
     scaling: {{ label: {{ enabled: true, min: 8, max: 14 }} }}
@@ -625,7 +793,13 @@ const options = {{
       damping: 0.45,
       avoidOverlap: 0.9
     }},
-    stabilization: {{ enabled: true, iterations: 220, updateInterval: 25 }}
+    // Live settle for all sizes — short batch stabilize freezes circular layouts.
+    stabilization: {{
+      enabled: false,
+      iterations: STAB_ITERS,
+      updateInterval: 25,
+      fit: false
+    }}
   }},
   interaction: {{
     hover: true,
@@ -634,11 +808,15 @@ const options = {{
     dragView: true,
     keyboard: {{ enabled: true, bindToWindow: false }}
   }},
-  layout: {{ improvedLayout: true }}
+  layout: {{ improvedLayout: false }}
 }};
 
-const network = new vis.Network(container, networkData, options);
+network = new vis.Network(container, networkData, options);
 container.setAttribute('tabindex', '0');
+document.getElementById('fit-view-btn').addEventListener('click', (ev) => {{
+  ev.preventDefault();
+  fitView();
+}});
 
 network.on('click', function(params) {{
   if (params.nodes.length === 0) {{
@@ -667,39 +845,90 @@ network.on('click', function(params) {{
 network.on('hoverNode', () => {{ container.style.cursor = 'pointer'; }});
 network.on('blurNode', () => {{ container.style.cursor = 'default'; }});
 
-network.once('stabilizationIterationsDone', function() {{
-  // Holistic: always fit the full graph
-  network.fit({{ animation: {{ duration: 700, easingFunction: 'easeInOutQuad' }} }});
+function cancelSettle() {{
+  settleGen += 1;
+  if (settleTimer) {{
+    clearTimeout(settleTimer);
+    settleTimer = null;
+  }}
+}}
+
+function beginLiveSettle(onDone) {{
+  if (!network) return;
+  cancelSettle();
+  const gen = settleGen;
+  // Always re-apply full solver options. Partial physics setOptions can leave
+  // forceAtlas2Based in a dead state on sparse graphs (wiki).
+  network.setOptions({{
+    groups: {{ useDefaultGroups: false }},
+    layout: {{ improvedLayout: false }},
+    physics: Object.assign({{}}, PHYSICS_BASE, {{
+      enabled: true,
+      stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
+    }})
+  }});
+  try {{ network.startSimulation(); }} catch (e) {{}}
+  // Time-box only — do not use 'stabilized' (fires too early on sparse graphs).
+  settleTimer = setTimeout(() => {{
+    if (gen !== settleGen) return;
+    settleTimer = null;
+    stopPhysics();
+    if (typeof onDone === 'function') onDone();
+  }}, LIVE_SETTLE_MS);
+}}
+
+// User rearrange: live settle (visible). Batch network.stabilize() freezes/no-ops
+// on Force Atlas + sparse wiki graphs; Neo4j barnesHut hid the bug.
+function runBatchStabilize(onDone) {{
+  beginLiveSettle(onDone);
+}}
+
+beginLiveSettle(() => {{
+  whenCanvasReady(() => {{
+    try {{
+      if (DATA.hub) {{
+        network.focus(DATA.hub, {{ scale: 0.85, animation: {{ duration: 700 }} }});
+      }} else {{
+        network.fit({{ animation: {{ duration: 600 }} }});
+      }}
+    }} catch (e) {{}}
+  }});
 }});
 
 function filterGroup(group) {{
   activeGroup = group;
   markLegendActive(group);
-  if (!group) {{
-    networkData.nodes.update(rawNodes.map(n => ({{ id: n.id, hidden: false, opacity: 1 }})));
-    return;
-  }}
-  networkData.nodes.update(rawNodes.map(n => ({{
-    id: n.id,
-    hidden: false,
-    opacity: n.group === group ? 1 : 0.12
-  }})));
+  applyNodeVisibility();
 }}
 
 function stabilize() {{
-  const ids = networkData.nodes.getIds();
-  const spread = Math.max(1000, Math.sqrt(ids.length) * 220);
-  networkData.nodes.update(ids.map(id => ({{
-    id,
-    x: (Math.random() - 0.5) * spread,
-    y: (Math.random() - 0.5) * spread
-  }})));
-  network.setOptions({{ physics: {{ enabled: true }} }});
-  network.once('stabilizationIterationsDone', function() {{
-    network.fit({{ animation: {{ duration: 600 }} }});
+  if (!network || typeof networkData === 'undefined') return;
+  const maxDegLocal = Math.max(...rawNodes.map(n => n.degree || 1), 1);
+  const spread = Math.max(1000, Math.sqrt(rawNodes.length) * 220);
+  networkData.nodes.update(rawNodes.map(n => {{
+    const hubish = (n.degree || 1) >= maxDegLocal * 0.45;
+    return {{
+      id: n.id,
+      x: (Math.random() - 0.5) * spread,
+      y: (Math.random() - 0.5) * spread,
+      fixed: false,
+      color: {{
+        background: hubish ? n.color : darkenColor(n.color, 0.08),
+        border: lightenColor(n.color, 0.2),
+        highlight: {{ background: lightenColor(n.color, 0.18), border: '#ffffff' }},
+        hover: {{ background: lightenColor(n.color, 0.12), border: lightenColor(n.color, 0.28) }}
+      }},
+      shadow: {{ enabled: hubish, color: n.color + '55', size: 10, x: 0, y: 0 }}
+    }};
+  }}));
+  applyNodeVisibility();
+  runBatchStabilize(() => {{
+    whenCanvasReady(() => {{
+      try {{ network.fit({{ animation: {{ duration: 600 }} }}); }} catch (e) {{}}
+    }});
   }});
-  network.stabilize(220);
 }}
+
 
 function selectPattern(pattern) {{
   pattern = String(pattern || '');
@@ -714,6 +943,8 @@ function selectPattern(pattern) {{
     document.querySelectorAll('.pattern-btn').forEach(btn => {{ btn.disabled = false; }});
   }}, 15000);
 }}
+
+syncIsolateToggleLabel();
 
 <<<ASK_PANEL_JS>>>
 </script>
