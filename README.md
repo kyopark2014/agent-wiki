@@ -765,6 +765,10 @@ uvicorn application.server:app --host 0.0.0.0 --port 8501
 
 <img width="921" height="760" alt="image" src="https://github.com/user-attachments/assets/9ac17473-f301-4e86-9599-a6ede97043ca" />
 
+"wiki로 reasoning에 대해 조사하세요."라고 질문후 결과를 보면 아래와 같습니다.
+
+<img width="925" height="768" alt="image" src="https://github.com/user-attachments/assets/a2915115-69c3-4335-a4d7-b12651c8ad42" />
+
 ---
 
 ## Reference
