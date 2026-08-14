@@ -46,6 +46,7 @@ class GraphJobState:
     user_id: str
     status: str = "idle"  # idle|queued|running|ready|error|skipped_cooldown|skipped_unchanged
     error: str | None = None
+    message: str | None = None
     last_success_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -62,6 +63,7 @@ class GraphJobState:
             "user_id": self.user_id,
             "status": self.status,
             "error": self.error,
+            "message": self.message,
             "last_success_at": (
                 self.last_success_at.isoformat() if self.last_success_at else None
             ),
@@ -226,6 +228,7 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
         if not force and _source_unchanged(user_id) and not _queue_has_work(user_id):
             state.status = "skipped_unchanged"
             state.error = None
+            state.message = "변경된 소스가 없습니다."
             state.updated_at = _now()
             logger.info(
                 "Graph source unchanged for %s — skip pipeline",
@@ -235,6 +238,7 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
 
         if not force and _in_cooldown(state):
             state.status = "skipped_cooldown"
+            state.message = "잠시 후 다시 동기화할 수 있습니다."
             state.updated_at = _now()
             logger.info(
                 "Graph job cooldown active for %s (last_success=%s, cooldown=%ss) — skip",
@@ -246,6 +250,7 @@ def ensure_graph_job(user_id: str, *, force: bool = False) -> dict[str, Any]:
 
         state.status = "queued"
         state.error = None
+        state.message = "Knowledge 동기화를 백그라운드에서 시작합니다."
         state.started_at = _now()
         state.finished_at = None
         state.updated_at = state.started_at
@@ -265,6 +270,7 @@ def _run_pipeline(user_id: str, force: bool = False) -> None:
     with _lock:
         state = _get_or_create(user_id)
         state.status = "running"
+        state.message = "Knowledge 그래프 파이프라인 실행 중…"
         state.updated_at = _now()
 
     logger.info("Graph pipeline starting for user=%s force=%s", user_id, force)
@@ -295,6 +301,7 @@ def _run_pipeline(user_id: str, force: bool = False) -> None:
             now = _now()
             state.status = "ready"
             state.error = None
+            state.message = "Knowledge 동기화가 완료되었습니다."
             state.last_success_at = now
             state.finished_at = now
             state.updated_at = now
@@ -306,6 +313,7 @@ def _run_pipeline(user_id: str, force: bool = False) -> None:
             now = _now()
             state.status = "error"
             state.error = str(exc)[:500]
+            state.message = state.error
             state.finished_at = now
             state.updated_at = now
             # Failures do not set last_success_at — retries allowed immediately.

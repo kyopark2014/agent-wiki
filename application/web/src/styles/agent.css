@@ -2387,3 +2387,122 @@ button.config-popover-choice.is-selected {
   color: #4ade80;
   font-size: 13px;
 }
+
+.sync-progress-overlay {
+  z-index: 1100;
+}
+
+.sync-progress-modal {
+  width: min(420px, 92vw);
+  padding: 20px 22px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  background: var(--bg-secondary, #1a1d24);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+  color: var(--text-primary);
+}
+
+.sync-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.sync-progress-header h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.sync-progress-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.sync-progress-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 8px 4px 4px;
+}
+
+.sync-progress-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid rgba(16, 163, 127, 0.2);
+  border-top-color: var(--accent, #10a37f);
+  animation: sync-progress-spin 0.8s linear infinite;
+}
+
+.sync-progress-done {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 163, 127, 0.18);
+  color: #4ade80;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+@keyframes sync-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sync-progress-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.sync-progress-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.sync-progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.sync-progress-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--accent, #10a37f);
+  color: #fff;
+}
+
+.sync-progress-btn.is-secondary {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+}
+
+.sync-progress-btn:hover {
+  filter: brightness(1.05);
+}

@@ -80,6 +80,7 @@ export interface GraphStatus {
   status: "idle" | "queued" | "running" | "ready" | "error" | "skipped_cooldown" | "disabled" | string;
   enabled?: boolean;
   error?: string | null;
+  message?: string | null;
   last_success_at?: string | null;
   cooldown_seconds?: number;
   next_eligible_at?: string | null;

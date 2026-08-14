@@ -9,6 +9,7 @@ import { KnowledgeGraphModal } from "./KnowledgeGraphModal";
 import { LlmGatewayModal } from "./LlmGatewayModal";
 import { WikiGraphModal } from "./WikiGraphModal";
 import { WikiConfigureModal } from "./WikiConfigureModal";
+import { SyncProgressModal } from "./SyncProgressModal";
 import { TaskListItem } from "./TaskListItem";
 import {
   AppearanceIcon,
@@ -99,8 +100,10 @@ export function Sidebar({
   const [wikiConfigureOpen, setWikiConfigureOpen] = useState(false);
   const [wikiSyncBusy, setWikiSyncBusy] = useState(false);
   const [wikiSyncMessage, setWikiSyncMessage] = useState<string | null>(null);
+  const [wikiSyncPopupOpen, setWikiSyncPopupOpen] = useState(false);
   const [knowledgeSyncBusy, setKnowledgeSyncBusy] = useState(false);
   const [knowledgeSyncMessage, setKnowledgeSyncMessage] = useState<string | null>(null);
+  const [knowledgeSyncPopupOpen, setKnowledgeSyncPopupOpen] = useState(false);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const { theme, setTheme } = useTheme();
   const skills = activeTask?.skills ?? config?.default_skills ?? [];
@@ -145,7 +148,7 @@ export function Sidebar({
       if (!(target instanceof Element)) return;
       if (settingsSectionRef.current?.contains(target)) return;
       if (target.closest(".config-popover")) return;
-      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal, .wiki-configure-modal")) return;
+      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal, .wiki-configure-modal, .sync-progress-modal")) return;
       collapseSettings();
     }
 
@@ -165,8 +168,9 @@ export function Sidebar({
       return;
     }
     if (choice !== "Sync") return;
+    setWikiSyncPopupOpen(true);
     setWikiSyncBusy(true);
-    setWikiSyncMessage(null);
+    setWikiSyncMessage("Wiki 동기화를 시작합니다…");
     try {
       const result = await api.syncWiki(false);
       const status = result.status;
@@ -179,7 +183,9 @@ export function Sidebar({
       } else {
         // Keep syncing indicator; background poll clears it when done.
         setWikiSyncBusy(true);
-        setWikiSyncMessage("Wiki 동기화를 백그라운드에서 실행 중입니다.");
+        setWikiSyncMessage(
+          result.message || "Wiki 동기화를 백그라운드에서 실행 중입니다.",
+        );
       }
     } catch (err) {
       setWikiSyncBusy(false);
@@ -209,8 +215,9 @@ export function Sidebar({
       return;
     }
     if (choice !== "Sync") return;
+    setKnowledgeSyncPopupOpen(true);
     setKnowledgeSyncBusy(true);
-    setKnowledgeSyncMessage(null);
+    setKnowledgeSyncMessage("Knowledge 동기화를 시작합니다…");
     try {
       const result = await api.rebuildGraph(false);
       const status = result.status;
@@ -219,16 +226,25 @@ export function Sidebar({
         setKnowledgeSyncMessage(result.error || "Knowledge 동기화에 실패했습니다.");
       } else if (status === "skipped_cooldown") {
         setKnowledgeSyncBusy(false);
-        setKnowledgeSyncMessage("잠시 후 다시 동기화할 수 있습니다.");
+        setKnowledgeSyncMessage(
+          result.message || "잠시 후 다시 동기화할 수 있습니다.",
+        );
+      } else if (status === "skipped_unchanged") {
+        setKnowledgeSyncBusy(false);
+        setKnowledgeSyncMessage(result.message || "변경된 소스가 없습니다.");
       } else if (status === "disabled") {
         setKnowledgeSyncBusy(false);
         setKnowledgeSyncMessage("Knowledge가 Off 상태입니다. On으로 켠 뒤 Sync 하세요.");
       } else if (status === "queued" || status === "running") {
         setKnowledgeSyncBusy(true);
-        setKnowledgeSyncMessage("Knowledge 동기화를 백그라운드에서 실행 중입니다.");
+        setKnowledgeSyncMessage(
+          result.message || "Knowledge 동기화를 백그라운드에서 실행 중입니다.",
+        );
       } else {
         setKnowledgeSyncBusy(false);
-        setKnowledgeSyncMessage("Knowledge 동기화가 완료되었습니다.");
+        setKnowledgeSyncMessage(
+          result.message || "Knowledge 동기화가 완료되었습니다.",
+        );
       }
     } catch (err) {
       setKnowledgeSyncBusy(false);
@@ -292,13 +308,15 @@ export function Sidebar({
         setKnowledgeSyncBusy(busy);
         if (busy) {
           setKnowledgeSyncMessage(
-            "Knowledge 동기화를 백그라운드에서 실행 중입니다.",
+            next.message || "Knowledge 동기화를 백그라운드에서 실행 중입니다.",
           );
           timer = setTimeout(pollKnowledgeSync, 2500);
           return;
         }
         if (next.status === "ready") {
-          setKnowledgeSyncMessage("Knowledge 동기화가 완료되었습니다.");
+          setKnowledgeSyncMessage(
+            next.message || "Knowledge 동기화가 완료되었습니다.",
+          );
         } else if (next.status === "error") {
           setKnowledgeSyncMessage(next.error || "Knowledge 동기화에 실패했습니다.");
         }
@@ -680,6 +698,24 @@ export function Sidebar({
 
       {wikiConfigureOpen && (
         <WikiConfigureModal onClose={() => setWikiConfigureOpen(false)} />
+      )}
+
+      {wikiSyncPopupOpen && (
+        <SyncProgressModal
+          title="Wiki Sync"
+          busy={wikiSyncBusy}
+          message={wikiSyncMessage}
+          onClose={() => setWikiSyncPopupOpen(false)}
+        />
+      )}
+
+      {knowledgeSyncPopupOpen && (
+        <SyncProgressModal
+          title="Knowledge Sync"
+          busy={knowledgeSyncBusy}
+          message={knowledgeSyncMessage}
+          onClose={() => setKnowledgeSyncPopupOpen(false)}
+        />
       )}
 
       {llmGatewayOpen && activeTask && (

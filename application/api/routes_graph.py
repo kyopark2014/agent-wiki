@@ -75,6 +75,7 @@ def graph_status(request: Request) -> dict:
         "status": status,
         "enabled": enabled,
         "error": job.get("error"),
+        "message": job.get("message"),
         "last_success_at": job.get("last_success_at"),
         "cooldown_seconds": job.get("cooldown_seconds"),
         "next_eligible_at": job.get("next_eligible_at"),
