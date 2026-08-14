@@ -52,33 +52,40 @@ except Exception as e:
 def _get_chat():
     """Create ChatBedrock instance for text extraction."""
     stop_sequence = "\n\nHuman:" if model_type == "claude" else ""
-    max_tokens = 16384 if "claude-4" in model_id else 8192
+    mid = (model_id or "").lower()
+    if "claude-sonnet-5" in mid or "claude-5-sonnet" in mid or "claude-opus-5" in mid:
+        max_tokens = 128000
+    elif "claude-4" in mid or "claude-sonnet-4" in mid or "claude-opus-4" in mid:
+        max_tokens = 16384
+    else:
+        max_tokens = 8192
 
-    # bedrock   
     boto3_bedrock = boto3.client(
-        service_name='bedrock-runtime',
+        service_name="bedrock-runtime",
         region_name=bedrock_region,
         config=Config(
-            retries = {
-                'max_attempts': 30
-            },
-            read_timeout=300
-        )
+            retries={"max_attempts": 30},
+            read_timeout=300,
+        ),
     )
 
+    # Do not pass temperature/top_k: Claude 5.x (and some 4.x) reject them
+    # with ValidationException: "`temperature` is deprecated for this model."
     parameters = {
         "max_tokens": max_tokens,
-        "temperature": 0.1,
-        "top_k": 250,
         "stop_sequences": [stop_sequence],
     }
 
-    return ChatBedrock(
-        model_id=model_id,
-        client=boto3_bedrock,
-        model_kwargs=parameters,
-        region_name=bedrock_region,
-    )
+    chat_kwargs = {
+        "model_id": model_id,
+        "client": boto3_bedrock,
+        "model_kwargs": parameters,
+        "region_name": bedrock_region,
+    }
+    if model_type == "claude":
+        chat_kwargs["provider"] = "anthropic"
+
+    return ChatBedrock(**chat_kwargs)
 
 
 def _prepare_image_base64(
@@ -122,6 +129,36 @@ def _prepare_image_base64(
     raise ValueError("이미지 크기가 너무 큽니다. 5MB 이하의 이미지를 사용해주세요.")
 
 
+def _content_to_text(content: object) -> str:
+    """Normalize LangChain/Bedrock message content to a plain string.
+
+    Newer Claude/Bedrock responses often return ``content`` as a list of blocks
+    (e.g. ``[{"type": "text", "text": "..."}]``). Using ``len(content) < 10`` on
+    that list treats a successful 1-block reply as failure.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+                elif item.get("type") == "text" and item.get("text"):
+                    parts.append(str(item["text"]))
+            else:
+                text = getattr(item, "text", None)
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts).strip()
+    return str(content).strip()
+
+
 def _extract_text_with_llm(img_base64: str, prompt: Optional[str] = None) -> str:
     """Extract text from image using LLM."""
     query = prompt or "텍스트를 추출해서 markdown 포맷으로 변환하세요. <result> tag를 붙여주세요."
@@ -144,13 +181,24 @@ def _extract_text_with_llm(img_base64: str, prompt: Optional[str] = None) -> str
         logger.info(f"LLM attempt: {attempt}")
         try:
             result = multimodal.invoke(messages)
-            extracted_text = result.content
+            raw = result.content
+            extracted_text = _content_to_text(raw)
+            logger.info(
+                "LLM content type=%s raw_len=%s text_len=%s",
+                type(raw).__name__,
+                len(raw) if hasattr(raw, "__len__") else "n/a",
+                len(extracted_text),
+            )
             break
         except Exception:
             err_msg = traceback.format_exc()
             logger.warning(f"LLM error: {err_msg}")
 
     if len(extracted_text) < 10:
+        logger.warning(
+            "LLM returned too little text (len=%s); marking as extraction failure",
+            len(extracted_text),
+        )
         extracted_text = "텍스트를 추출하지 못하였습니다."
 
     return extracted_text

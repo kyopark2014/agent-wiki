@@ -599,6 +599,7 @@ DEFAULT_GRAPH_PATTERN = "pattern1"
 _DEFAULT_USER_SETTINGS: dict[str, object] = {
     "knowledge_graph_enabled": True,
     "graph_pattern": DEFAULT_GRAPH_PATTERN,
+    "foundation_model_parser_enabled": False,
 }
 
 
@@ -643,6 +644,10 @@ def load_user_settings(user_id: str | None) -> dict[str, object]:
                 settings["knowledge_graph_enabled"] = bool(raw["knowledge_graph_enabled"])
             if "graph_pattern" in raw:
                 settings["graph_pattern"] = normalize_graph_pattern(raw.get("graph_pattern"))
+            if "foundation_model_parser_enabled" in raw:
+                settings["foundation_model_parser_enabled"] = bool(
+                    raw["foundation_model_parser_enabled"]
+                )
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("Failed to load user settings %s: %s", path, e)
     return settings
@@ -664,6 +669,8 @@ def save_user_settings(user_id: str | None, **updates: object) -> dict[str, obje
             settings[key] = bool(value)
         elif key == "graph_pattern":
             settings[key] = normalize_graph_pattern(value)
+        elif key == "foundation_model_parser_enabled":
+            settings[key] = bool(value)
     path = get_user_settings_path(user_id)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
@@ -675,6 +682,23 @@ def save_user_settings(user_id: str | None, **updates: object) -> dict[str, obje
 def is_knowledge_graph_enabled(user_id: str | None) -> bool:
     """True when Knowledge Graph feature is on (default)."""
     return bool(load_user_settings(user_id).get("knowledge_graph_enabled", True))
+
+
+def is_foundation_model_parser_enabled(user_id: str | None) -> bool:
+    """True when Wiki Sync uses multimodal PDF→images→LLM (default: False)."""
+    return bool(
+        load_user_settings(user_id).get("foundation_model_parser_enabled", False)
+    )
+
+
+def set_foundation_model_parser_enabled(
+    enabled: bool, *, user_id: str | None
+) -> bool:
+    """Persist Foundation Model Parser toggle; returns the stored value."""
+    settings = save_user_settings(
+        user_id, foundation_model_parser_enabled=bool(enabled)
+    )
+    return bool(settings.get("foundation_model_parser_enabled", False))
 
 
 def is_hybrid_graph_search_enabled() -> bool:

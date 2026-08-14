@@ -45,6 +45,7 @@ class WikiPatternPatch(BaseModel):
 
 class WikiSourcesPut(BaseModel):
     folders: list[str] = Field(default_factory=list, max_length=3)
+    foundation_model_parser_enabled: bool | None = None
 
 
 class WikiUrlIngest(BaseModel):
@@ -73,6 +74,9 @@ def wiki_status(request: Request) -> dict:
         "storage": str(path.parent),
         "status": status,
         "pattern": utils.get_wiki_graph_pattern(user_id),
+        "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
+            user_id
+        ),
         "error": job.get("error"),
         "message": job.get("message"),
         "last_success_at": job.get("last_success_at"),
@@ -87,6 +91,9 @@ def get_wiki_sources(request: Request) -> dict:
         "folders": utils.get_wiki_source_folders(user_id),
         "urls": utils.get_wiki_source_urls(user_id),
         "max_sources": utils.MAX_WIKI_SOURCE_FOLDERS,
+        "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
+            user_id
+        ),
     }
 
 
@@ -98,6 +105,11 @@ def put_wiki_sources(body: WikiSourcesPut, request: Request) -> dict:
         saved = utils.set_wiki_sources(
             folders=list(body.folders or []), user_id=user_id
         )
+        if body.foundation_model_parser_enabled is not None:
+            utils.set_foundation_model_parser_enabled(
+                bool(body.foundation_model_parser_enabled),
+                user_id=user_id,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -110,6 +122,9 @@ def put_wiki_sources(body: WikiSourcesPut, request: Request) -> dict:
         "folders": saved["folders"],
         "urls": saved["urls"],
         "max_sources": utils.MAX_WIKI_SOURCE_FOLDERS,
+        "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
+            user_id
+        ),
     }
 
 

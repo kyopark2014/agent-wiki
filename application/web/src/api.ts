@@ -106,6 +106,7 @@ export interface WikiSourcesConfig {
   folders: string[];
   urls: string[];
   max_sources: number;
+  foundation_model_parser_enabled?: boolean;
 }
 
 export interface WikiUrlIngestResult {
@@ -184,7 +185,10 @@ export const api = {
       body: JSON.stringify({ pattern }),
     }),
   getWikiSources: () => request<WikiSourcesConfig>("/api/wiki/sources"),
-  putWikiSources: (body: { folders: string[] }) =>
+  putWikiSources: (body: {
+    folders: string[];
+    foundation_model_parser_enabled?: boolean;
+  }) =>
     request<WikiSourcesConfig>("/api/wiki/sources", {
       method: "PUT",
       body: JSON.stringify(body),

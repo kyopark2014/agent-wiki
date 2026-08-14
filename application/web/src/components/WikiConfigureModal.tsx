@@ -33,6 +33,7 @@ export function WikiConfigureModal({ onClose }: Props) {
   const [urlInput, setUrlInput] = useState("");
   const [pendingDocs, setPendingDocs] = useState<File[]>([]);
   const [wikiDir, setWikiDir] = useState("");
+  const [foundationModelParser, setFoundationModelParser] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [addingUrl, setAddingUrl] = useState(false);
@@ -52,6 +53,9 @@ export function WikiConfigureModal({ onClose }: Props) {
         if (cancelled) return;
         setWikiDir(data.wiki_dir || "");
         setSourceSlots(emptySlots(data.folders || [], data.max_sources || SOURCE_SLOTS));
+        setFoundationModelParser(
+          Boolean(data.foundation_model_parser_enabled),
+        );
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -98,13 +102,24 @@ export function WikiConfigureModal({ onClose }: Props) {
       }
 
       const folders = sourceSlots.map((s) => s.trim()).filter(Boolean);
-      const saved = await api.putWikiSources({ folders });
+      const saved = await api.putWikiSources({
+        folders,
+        foundation_model_parser_enabled: foundationModelParser,
+      });
       setSourceSlots(emptySlots(saved.folders || [], saved.max_sources || SOURCE_SLOTS));
+      setFoundationModelParser(
+        Boolean(saved.foundation_model_parser_enabled),
+      );
       if (saved.folders.length > 0) {
         messages.push(`Source ${saved.folders.length}개 저장`);
       } else {
         messages.push("Sources 비움 (Sync 시 raw 포함)");
       }
+      messages.push(
+        foundationModelParser
+          ? "Foundation Model Parser On"
+          : "Foundation Model Parser Off",
+      );
 
       setSuccess(
         messages.join(". ") + ". Sync를 실행하면 그래프에 반영됩니다.",
@@ -198,6 +213,21 @@ export function WikiConfigureModal({ onClose }: Props) {
           <p className="llm-gateway-muted">불러오는 중…</p>
         ) : (
           <>
+            <label className="wiki-configure-toggle">
+              <span className="wiki-configure-toggle-title">
+                Foundation Model Parser
+              </span>
+              <input
+                type="checkbox"
+                checked={foundationModelParser}
+                disabled={busy || addingUrl}
+                onChange={(e) => {
+                  setFoundationModelParser(e.target.checked);
+                  setSuccess(null);
+                }}
+              />
+            </label>
+
             <div className="wiki-configure-section-label">문서 추가</div>
             <div className="wiki-configure-docs">
               <input

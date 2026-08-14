@@ -119,9 +119,11 @@ flowchart TB
 
 Agent는 도구(MCP)·Skill 지시문을 받아 ReAct 루프로 동작합니다.
 
-### 두 그래프 비교
 
-agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장·파이프라인이 다르고, 시각화 패턴·문서검색 UI는 [Graph](#graph) · [Wiki 검색](#wiki-검색)에서 공통으로 설명합니다.
+
+### Knowledge Graph · Wiki Graph 개요
+
+agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
 
 | | **Knowledge Graph** | **Wiki Graph** |
 |--|---------------------|----------------|
@@ -129,34 +131,48 @@ agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장
 | 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
 | 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
 | API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
-| 갱신 | Settings → **Knowledge** → Sync | Settings → **Wiki** → Sync |
-| 보기 | Settings → Knowledge → Graph / 브랜드 클릭 | Settings → Wiki → Graph |
+| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
+| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
 | Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
+
+
+
+### ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
+
+| **LLM Wiki가 유리한 경우** | **RAG가 유리한 경우** |
+|---|---|
+| 여러 문서를 넘나드는 복잡한 질문 | 실시간으로 변하는 대규모 데이터 |
+| 깊은 이해와 합성이 필요할 때 | 단순 사실 조회 |
+| 전문가가 직접 큐레이션한 코퍼스 | 출처(provenance) 추적이 중요할 때 |
+| 구조적 추론이 필요한 질문 | 빠른 배포가 필요할 때 |
+
+> 💡 **핵심 비유**: RAG는 데이터베이스 쿼리, LLM Wiki는 제2의 두뇌 — 경쟁 관계가 아니라 상호 보완 관계!
+
+agent-wiki에서는 **채팅 Agent(필요 시 RAG MCP)** 와 **그래프 문서검색**을 함께 둘 수 있습니다. 그래프 쪽은 임베딩 인덱스 없이 `graph.json` 순회 + 원문 excerpt로 답을 보강합니다.
+
+
+
+
 
 ---
 
 ## Knowledge Graph
 
-**채팅 대화**에서 엔티티·관계를 뽑아 보는 그래프입니다. Cursor `/graphify` Skill에만 의존하지 않고, [`graph/`](./graph/) 단독 파이프라인이 **tasks.db → corpus → graph.json → HTML**을 만듭니다.
+**채팅 대화**에서 엔티티·관계를 뽑아, 사이드바 브랜드 클릭 시 모달로 보는 그래프입니다. Cursor `/graphify` Skill에만 의존하지 않고, [`graph/`](./graph/) 단독 파이프라인이 **tasks.db → corpus → graph.json → HTML**을 만듭니다. 오케스트레이터는 [run_pipeline.py](./graph/run_pipeline.py)입니다.
 
-- 오케스트레이터: [run_pipeline.py](./graph/run_pipeline.py)
-- 앱 트리거: Settings → **Knowledge** → On 후 **Sync** (`POST /api/graph/rebuild`, `graph_jobs.py` — 쿨다운·지문 스킵)
-- 보기: Settings → Knowledge → **Graph**, 또는 사이드바 브랜드 클릭 → `GET /api/graph`
-- Agent 검색: MCP **`graph memory`** (`recall_graph_memory`) — [Agent MCP](#agent-mcp-graph-memory--wiki)
-
-### 폴더 위치
+#### 폴더 위치
 
 | 역할 | 경로 |
 |------|------|
 | 파이프라인 코드 | `agent-wiki/graph/` (`run_pipeline.py`, `export_corpus.py`, …) |
-| 사용자 작업 공간 | `.session_storage/{user}/graph/` |
+| 사용자 작업 공간 | `{SESSION_STORAGE}/.session_storage/{user}/graph/` |
 | Corpus | `…/graph/corpus/*.md` |
 | 산출물 | `…/graph/out/graph.json`, `graph.html` (+ `GRAPH_REPORT.md`, `node_embeddings.json`) |
 | 입력 DB | `tasks.db` (Agent 대화) |
 
 예: `{user}/graph/out/graph.html` → `GET /api/graph`
 
-### 생성 과정
+#### 생성 과정
 
 ```mermaid
 flowchart LR
@@ -199,37 +215,16 @@ tasks.db
 | INFERRED | 추론 (보통 0.6–0.9) · HTML에서 점선으로 표시되는 경우 있음 |
 | AMBIGUOUS | 불확실 (0.1–0.3) |
 
-### LLM 설정 · CLI
 
-1. **우선**: `application/config.json`의 `llm_gateway_url` / `llm_gateway_key`
-2. **fallback**: 환경변수 `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY`
-3. **gateway 없음**: AWS Bedrock Converse (boto3 자격증명). 모델은 `GRAPHIFY_LLM_MODEL` 등 — 상세는 [graph/README.md](./graph/README.md)
 
-```bash
-cd agent-wiki/graph
-python -m pip install -r requirements.txt
-python run_pipeline.py --user user01          # 증분: delta export + queue extract
-python run_pipeline.py --user user01 --full   # corpus 재구축 + 미캐시 재추출
-# 단계별
-python export_corpus.py --user user01
-python run_extract.py --from-queue           # 또는 전체: run_extract.py
-python publish_out.py --user user01
-```
 
-**입력은 대화 turn 마크다운**입니다. 폴더·PDF 일괄 추출은 [Wiki Graph](#wiki-graph)를 사용합니다. 시각화·문서검색은 [Graph](#graph) · [Wiki 검색](#wiki-검색)을 참고하세요.
-
----
 
 ## Wiki Graph
 
-**위키 코퍼스**(`raw` / Sources)를 Sync해 만드는 그래프입니다. Knowledge Graph(채팅 세션)와 저장소·파이프라인이 완전히 분리됩니다. 기반은 [graphify](https://github.com/safishamsi/graphify) Skill/CLI — Karpathy의 `/raw` inbox 아이디어를 폴더 단위로 추출합니다.
+Settings → Wiki → **Sync** (`wiki_jobs.py` 백그라운드) 할 경우에 Wiki 그래프를 생성합니다. 시각화 패턴·문서검색은 아래 [Graph](#graph)를 참고하세요. 채팅 Agent에서 Wiki 코퍼스를 검색하려면 Settings → MCP에서 **`wiki`** 를 켭니다. 도구 `recall_wiki`는 `POST /api/wiki/query`와 같은 `query_user_graph()` 경로를 사용합니다. 자세한 내용은 [Wiki 검색 — Agent MCP](#agent-mcp-graph-memory--wiki)를 보세요.
 
-- 오케스트레이터: [sync_wiki.py](./application/skills/graphify/scripts/sync_wiki.py)
-- 앱 트리거: Settings → **Wiki** → **Sync** (`wiki_jobs.py` 백그라운드)
-- 보기: Settings → Wiki → **Graph** → `GET /api/wiki/graph`
-- Agent 검색: MCP **`wiki`** (`recall_wiki`) — [Agent MCP](#agent-mcp-graph-memory--wiki)
 
-### 핵심 루프 (LLM Wiki)
+### 핵심 루프 (Core Loop)
 
 ```
 원시 데이터 투입 → LLM이 위키·그래프 컴파일·유지 → 쿼리 → 출력물 다시 위키에 저장 → 지식 복리 축적
@@ -238,35 +233,28 @@ python publish_out.py --user user01
 | 항목 | 내용 |
 |------|------|
 | 저장 형식 | 구조화된 **Markdown 파일** (Obsidian 호환 가능) |
-| 인프라 | RAG 파이프라인·벡터 DB 필수 아님 |
+| 인프라 | RAG 파이프라인 필수 아님, 벡터 DB 필수 아님 |
 | 자동 기능 | 인덱스, 요약, 토픽 간 백링크·커뮤니티 유지 |
-| 린팅 | 불일치 감지, 새 아티클 필요 갭 발굴 |
-| 출력 | Markdown 리포트, 슬라이드, 차트, 인터랙티브 graph HTML |
+| 린팅(Linting) | 불일치 감지, 새 아티클 필요 갭 자동 발굴 |
+| 출력 형식 | Markdown 리포트, Marp 슬라이드, Matplotlib 차트, 인터랙티브 graph HTML |
+| 장기 비전 | 합성 데이터 생성 + 파인튜닝 → 모델 가중치에 코퍼스 내재화 |
 
-### LLM Wiki vs RAG
-
-| **LLM Wiki가 유리한 경우** | **RAG가 유리한 경우** |
-|---|---|
-| 여러 문서를 넘나드는 복잡한 질문 | 실시간으로 변하는 대규모 데이터 |
-| 깊은 이해와 합성이 필요할 때 | 단순 사실 조회 |
-| 전문가가 직접 큐레이션한 코퍼스 | 출처(provenance) 추적이 중요할 때 |
-| 구조적 추론이 필요한 질문 | 빠른 배포가 필요할 때 |
-
-> RAG는 데이터베이스 쿼리, LLM Wiki는 제2의 두뇌 — 경쟁이 아니라 상호 보완입니다. agent-wiki에서는 채팅 Agent(필요 시 RAG MCP)와 그래프 문서검색을 함께 둘 수 있습니다.
 
 ### 폴더 위치
 
 | 역할 | 경로 |
 |------|------|
-| Wiki 루트 | `.session_storage/{user}/wiki/` |
+| Wiki 루트 | `.session_storage/{user}/wiki/` (로그인 사용자별) |
 | Inbox | `{wiki}/raw/` — 넣고 싶은 원본을 모음 |
 | Sources | Settings → Wiki → Configure (최대 3개, `{wiki}/wiki_sources.json`) |
-| 산출물 | `{wiki}/graphify-out/` (`app-graph.html`, `graph.json`, `converted/`, `cache/`) |
+| 산출물 디렉터리 | `{wiki}/graphify-out/` |
+| 앱용 HTML | `graphify-out/app-graph.html` → `GET /api/wiki/graph` |
+| JSON | `graphify-out/graph.json` |
 
 ```text
 application/.session_storage/{user}/wiki/
 ├── raw/                   # 논문·노트·PDF·URL 수집본 (inbox)
-├── wiki_sources.json      # Sync Sources · URL 이력
+├── wiki_sources.json      # Sync Sources · URL 이력 (사용자별)
 └── graphify-out/
     ├── converted/         # PDF/Office → markdown 변환본
     ├── graph.json
@@ -275,13 +263,13 @@ application/.session_storage/{user}/wiki/
     └── cache/             # SHA256 캐시 (변경된 파일만 재처리)
 ```
 
-> Upstream graphify `detect()`는 기본적으로 Source 폴더 옆에 `{source}/graphify-out/converted`를 만듭니다. Wiki Sync는 이를 **해당 사용자**의 `{wiki}/graphify-out/converted`로 옮깁니다. Source 옆 `graphify-out`은 Sync 산출물이 아닙니다.
+> **Note:** Upstream graphify `detect()`는 기본적으로 **Source 폴더 옆**에 `{source}/graphify-out/converted`를 만듭니다. Wiki Sync는 이를 **해당 사용자의** `{wiki}/graphify-out/converted`로 옮긴 뒤, PDF 등 시맨틱용 마크다운도 같은 곳에 둡니다. Source 옆 `graphify-out`은 Sync 산출물이 아닙니다.
 
 ### 생성 과정
 
 ```text
 Sources / raw (없으면 Wiki 루트)
-  → detect (증분이면 detect_incremental)
+  → detect (증분이면 소스 폴더별 mtime diff → 신규/변경만; Source+raw 다중 폴더도 증분)
   → AST 추출 (코드)
   → 시맨틱 추출 (.md; pdf/txt는 md로 변환 후)
   → build + cluster
@@ -289,52 +277,148 @@ Sources / raw (없으면 Wiki 루트)
   → republish → app-graph.html (Force Atlas / Neo4j / Holistic)
 ```
 
-업스트림 CLI 계열: `detect() → extract() → build_graph() → cluster() → analyze() → report() → export()`
+증분 Sync는 `graph.json` + `manifest.json`이 있으면 Source 개수와 무관하게 **변경·신규 파일만** 재추출합니다. Foundation Model Parser를 나중에 켜도 이미 처리된 PDF는 다시 돌리지 않고, 새로 추가된 파일만 현재 파서 설정을 씁니다. 전체 재처리는 Sync의 full 모드가 필요할 때입니다.
+업스트림 graphify CLI 파이프라인(동일 계열):
+
+```
+detect() → extract() → build_graph() → cluster() → analyze() → report() → export()
+```
+
+설치 (업스트림 CLI / Skill용):
 
 ```text
 pip install graphifyy && graphify install
 /graphify .   # 현재 폴더에 실행
 ```
 
-채팅에서 `/graphify …` Skill을 쓰면 contents 등 폴더를 직접 그래프로 만들거나 질의할 수 있습니다(앱 Wiki Sync와 산출물 개념이 맞닿아 있음). 상세 질의 문법은 [검색하는 방법](#검색하는-방법)을 보세요.
+### 문서의 추가 (`raw` · Sources)
 
-### 문서 추가 (`raw` · Sources)
+Wiki Graph용 원본은 **`raw` 입력함(inbox)** 에 모읍니다. `raw`는 Sync가 자동 생성하는 폴더가 아니라, **넣고 싶은 코퍼스를 모아 두는 곳**입니다.
 
-Wiki Graph용 원본은 **`raw` 입력함(inbox)** 에 모읍니다. Sync가 자동 생성하는 폴더가 아니라, **넣고 싶은 코퍼스를 모아 두는 곳**입니다.
+Settings → Wiki → Sync는 `raw/`가 있으면 그 폴더를, 없으면 Wiki 루트 전체를 추출합니다. Sources를 Configure에서 지정하면 해당 폴더(최대 3개)를 추출합니다.
 
-- Sync: `raw/`가 있으면 그 폴더, 없으면 Wiki 루트. Configure에서 Sources(최대 3개)를 지정하면 해당 폴더를 추출
-- `.pdf`/`.txt`는 Sync 시 텍스트 마크다운으로 변환 후 추출(이미지는 앱 Wiki Sync에서 skip)
+#### `raw`의 용도
+
+- 논문·노트·스크린샷·코드·PDF 등 **그래프에 넣고 싶은 원본**을 두는 폴더
+- 직접 복사·이동하거나, `/graphify add <url>`로 URL을 받아 `./raw`에 저장
+- Sync / `/graphify`가 이 폴더(또는 지정 경로)를 읽어 `graphify-out/`에 그래프를 만듦
+
+#### 예: `/document/doc/doc01.pdf`만 있는 경우
+
+`raw`에 자동으로 들어오지 않습니다.
 
 | 하는 일 | `raw`에 생기는 것 |
-|--------|-------------------|
+|---------|-------------------|
 | 아무것도 안 함 | 없음 |
-| 파일을 `{wiki}/raw/`로 복사·이동 | 넣은 그대로 |
-| `/graphify /document/doc` | raw에 복사하지 않고 **그 경로를 직접** 추출 |
-| `/graphify add <url>` 또는 Configure URL | `{wiki}/raw`에 저장 |
+| 파일을 `{wiki}/raw/`로 복사·이동 | `doc01.pdf` (넣은 그대로) |
+| `/graphify /document/doc` | `raw`가 아니라 **그 경로를 직접** 추출 (raw에 복사본을 만들지 않음) |
+| `/graphify add <url>` | 받은 내용이 `./raw`에 저장됨 |
 
-Settings → Wiki → **Configure**로 Sources·URL을 관리하고, **Sync** 후 **Graph**로 결과를 봅니다. URL·Sources 이력은 `{wiki}/wiki_sources.json`에 저장됩니다.
+앱에서는 Settings → Wiki → **Configure**로 Sync **Sources**를 최대 3개까지 지정하고(Source 선택 시 폴더 메뉴), URL은 입력 시 바로 해당 사용자의 `{wiki}/raw`에 저장합니다. URL 이력·Sources는 `{wiki}/wiki_sources.json`에 저장됩니다. **Sync** 후 **Graph**로 결과를 봅니다.
 
-### URL 리소스 수집
+시맨틱 단계는 `.md`를 입력으로 쓰므로, Source의 `.pdf`/`.txt`는 Sync 시 텍스트 마크다운으로 변환한 뒤 추출합니다(이미지는 vision 미지원으로 skip).
 
-Configure에서 URL을 **추가하는 순간** `graphify.ingest`가 HTTP(S)로 가져와 `{wiki}/raw`에 저장합니다. Sync는 URL을 다시 fetch하지 않습니다.
+### URL 리소스 수집 방식
+
+Configure에서 URL을 **추가하는 순간** `graphify.ingest`가 HTTP(S)로 리소스를 가져와 해당 사용자의 `{wiki}/raw`에 저장합니다. Sync는 URL을 다시 fetch하지 않고, 이미 `raw`에 있는 파일(+설정된 폴더)만 추출합니다.
 
 | URL 유형 | 동작 |
 |----------|------|
-| 일반 웹페이지 | HTML → `html2text` → 마크다운 `.md` |
-| PDF / 이미지 | 바이너리 다운로드 |
-| tweet / arXiv / YouTube / GitHub 등 | 타입별 분기 |
+| 일반 웹페이지 | HTML을 받은 뒤 `html2text`로 마크다운 `.md`로 변환해 저장 |
+| PDF / 이미지 | 바이너리로 그대로 다운로드 |
+| tweet / arXiv / YouTube / GitHub 등 | 타입별 분기 (oEmbed, 초록, 오디오 등) |
 
-서버 측 HTTP fetch(`urllib` `safe_fetch`)이며, http/https만 허용하고 private IP·메타데이터 엔드포인트는 차단합니다. JS로만 렌더링되는 사이트는 본문이 거의 안 잡힐 수 있습니다.
+구현은 브라우저 자동화(Playwright 등)가 아니라 **서버 측 HTTP fetch + HTML→마크다운 변환**입니다 (`urllib` 기반 `safe_fetch`). http/https만 허용하고, private IP·클라우드 메타데이터 엔드포인트는 차단합니다. JavaScript로만 렌더링되는 사이트는 본문이 거의 안 잡힐 수 있습니다.
 
-### 지원 파일
+### 지원 파일 (업스트림 /graphify Skill 기준)
 
-- Code: .py, .ts, .js, .go, .rs, .java, .cpp, …
-- Documents: .md, .txt, .docx, …
+- Code: .py, .ts, .js, .go, .rs, .java, .cpp, etc.
+- Documents: .md, .txt, .docx, etc.
 - Papers: .pdf
-- Images: .png, .jpg, .webp (CLI/Skill vision; 앱 Wiki Sync는 skip)
-- Video/Audio: .mp4, .mp3, .wav (Whisper 전사 — CLI/Skill)
+- Images: .png, .jpg, .webp (vision 분석 — CLI/Skill; 앱 Wiki Sync는 이미지 skip)
+- Video/Audio: .mp4, .mp3, .wav (Whisper 전사)
 
-시각화·문서검색은 [Graph](#graph) · [Wiki 검색](#wiki-검색)을 참고하세요.
+
+
+### 마크다운 파일 생성 (Extract)
+
+시맨틱 추출은 **마크다운(또는 일반 텍스트)** 을 입력으로 씁니다. 타입마다 변환 시점이 다르며, 앱 Wiki Sync는 [`graph/sync_wiki.py`](./graph/sync_wiki.py)가 담당합니다. 코드는 md로 바꾸지 않고 AST만 추출합니다.
+
+```text
+Sources / raw
+  → detect()          # 분류 + Office(.docx/.xlsx) → md sidecar
+  → [Wiki Sync] relocate → {wiki}/graphify-out/converted/
+  → AST extract       # 코드만 (md 변환 없음)
+  → semantic extract  # 문서/논문: md로 stage 후 LLM 추출, stage PDF/txt/md → converted/      
+  → merge → graph.json
+```
+
+| 유형 | 변환 | 구현 | Wiki Sync |
+|------|------|------|-----------|
+| **Code** (.py, .ts, .js, .go, …) | md 변환 없음 · AST 추출 | `graphify.extract` | 동일 |
+| **.md / .txt / .rst** | 그대로 stage (길면 ~10KB 청크) | `_doc_to_markdown_body` / `_stage_docs_as_markdown` | `converted/{name}.md` 또는 `{stem}_partNN.md` |
+| **.docx / .xlsx** | `detect()` 시 Office→md | `graphify.detect.convert_office_file` (python-docx / openpyxl) | Source 옆 sidecar를 wiki `converted/`로 relocate |
+| **.pdf** | 페이지 텍스트 → md 래핑 (기본 pdfplumber/pypdf; Foundation Model Parser On 시 PDF→이미지→LLM) | [`graph/pdf2text.py`](./graph/pdf2text.py) | `# stem` + `## Page N` 형태로 stage |
+| **이미지** (.png, .jpg, .webp) | CLI/Skill: vision으로 직접 이해 (사전 md 변환 아님) | Skill 시맨틱 서브에이전트 | **skip** |
+| **Video/Audio** | Whisper → `.txt` → docs로 취급 | `graphify.transcribe` (faster-whisper) | Sync **미지원** |
+| **URL (웹페이지)** | 수집 시점 HTML→md | `graphify.ingest` (`html2text`) | `raw/*.md`에 저장 · Sync는 재fetch 안 함 |
+
+
+**Documents (.md / .txt)** `_doc_to_markdown_body`가 UTF-8로 읽고, `_stage_docs_as_markdown`이 `{wiki}/graphify-out/converted/`에 씁니다. 짧은 `.md`(≤12KB)는 파일명 그대로 복사하고, 긴 문서는 약 10,000자 단위 청크하여 `{stem}_part01.md` … + YAML frontmatter (`source_file`, `chunk`)로 저장합니다.
+
+**Office:** Heading→`#`/`##`, 리스트→`-`, 표·엑셀 시트→마크다운 테이블. 파일명은 `{stem}_{pathHash8}.md`이며 detect 목록에는 원본이 아니라 이 sidecar가 들어갑니다. (docx: `python-docx`, xlsx: `openpyxl`)
+
+#### Papers (.pdf) — Sync 스테이징
+
+기본(Foundation Model Parser **Off**): `_pdf_to_text` → [`graph/pdf2text.py`](./graph/pdf2text.py)의 classical 경로
+
+1. **pdfplumber**로 페이지별 텍스트 → `## Page N`
+2. 실패 시 **pypdf**
+
+Wiki Configure에서 **Foundation Model Parser**를 **On**하면 (기본 Off) rag-multimodal과 같은 멀티모달 경로를 씁니다.
+
+1. **PyMuPDF**로 페이지 PNG 렌더 (`page_001.png` …) → `{wiki}/graphify-out/converted/.pdf_pages/{stem}_{hash}/pages/`
+2. 각 이미지를 Bedrock 멀티모달 LLM으로 Markdown 변환 (`mcp_server_text_extraction` · img2text 프롬프트)
+3. **페이지마다** `.pdf_pages/.../extracted.md`에 `## Page N`을 append(+fsync). Sync가 중간에 끊겨도 다음 Sync에서 이어서 처리(이미 끝난 페이지·PNG는 skip)
+4. 전부 끝나면 `converted/{stem}.md`(또는 `_partNN.md`)로 stage. 실패 시(부분 md 없을 때만) classical(pdfplumber/pypdf)로 fallback
+
+그다음 아래 형태로 `converted/`에 stage한 뒤 `extract_corpus`에 넘깁니다.
+
+```text
+# {파일명stem}
+
+Source: `{원본경로}`
+
+## Page 1
+…
+```
+
+긴 PDF는 Documents와 같이 ~10KB 청크(`{stem}_partNN.md`) + YAML frontmatter(`source_file`, `chunk`)로 나눕니다. 추출 후 `_rewrite_extract_sources`가 노드·엣지의 `source_file`을 다시 **원본 PDF 경로**로 되돌립니다. 변환본은 디버깅용으로 `{wiki}/graphify-out/converted/`에 남습니다.
+
+업스트림 CLI/Skill은 PDF를 바이너리로 두고 서브에이전트가 읽게 할 수 있지만, **앱 Sync는 반드시 텍스트 md로 먼저 바꿉니다.**
+
+#### Images — CLI만
+
+- **Skill:** 시맨틱 서브에이전트가 vision으로 “이미지가 무엇인지” 이해해 JSON 추출 (OCR만이 아님).
+- **Wiki Sync:** `_stage_docs_as_markdown`에서 `.png` / `.jpg` / `.jpeg` / `.webp` / `.gif`를 명시적으로 skip.
+
+#### Video/Audio — CLI만
+
+- **Skill Step 2.5:** `graphify.transcribe.transcribe_all` → **faster-whisper** → `graphify-out/transcripts/*.txt` → docs로 시맨틱 추출.
+- **Wiki Sync:** `doc_files`에 video 키가 없고 Whisper 호출도 없습니다.
+
+#### URL (참고)
+
+Configure에서 URL 추가 시 `graphify.ingest`: 웹페이지는 `html2text`로 `raw/*.md` 저장, PDF/이미지는 바이너리 저장. Sync는 URL을 다시 fetch하지 않고, 이미 저장된 파일만 위 규칙으로 처리합니다.
+
+#### 한 줄 요약
+
+마크다운 파일 생성(Extract 전처리) = Office는 `detect`에서, PDF/txt/md는 Sync의 `_stage_docs_as_markdown`에서 `graphify-out/converted/`에 모은 뒤 시맨틱 LLM 추출; 코드는 AST만; 이미지·영상 md 변환은 업스트림 Skill/CLI 전용이고 앱 Wiki Sync는 하지 않습니다.
+
+
+
+
+
 
 ---
 
@@ -436,6 +520,11 @@ Holistic view의 graph 화면입니다.
 
 <img width="900" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
 
+
+
+
+
+
 ---
 
 ## 검색하는 방법
@@ -503,6 +592,11 @@ brew install --cask libreoffice
 ```bash
 /Downloads/Docs/AgenticAI의 ppt들을 pdf로 변환하세요. 이미 pdf가 있다면 skip 하세요.
 ```
+
+
+
+
+
 
 ---
 
@@ -572,6 +666,10 @@ CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 �
 
 <img width="368" height="451" alt="image" src="https://github.com/user-attachments/assets/00f5d8cf-c0ac-427f-b1e5-6ace6ba1daca" />
 
+
+
+
+
 ### Agent MCP (graph memory · wiki)
 
 그래프 HTML의 **문서검색**과 같은 엔진(`query_user_graph`)을 채팅 Agent가 MCP 도구로도 호출할 수 있습니다. Settings → **MCP**에서 서버를 켠 뒤, Agent가 관련 질문에 도구를 사용합니다.
@@ -593,6 +691,9 @@ CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 �
 
 ---
 
+
+
+
 ## 실행 방법
 
 ### 사전 요구
@@ -601,6 +702,28 @@ CLI `/graphify query`와 같은 BFS/DFS·budget 개념을 앱 문서검색이 �
 - (선택) AWS 자격증명 — Bedrock으로 채팅·그래프 추출할 때
 - (선택) LiteLLM gateway URL/Key — `application/config.json`
 - `graph/` 파이프라인: `cd graph && pip install -r requirements.txt` (graphifyy 등)
+
+### LLM 설정 (추출용)
+
+1. **우선**: `application/config.json`의 `llm_gateway_url` / `llm_gateway_key`
+2. **fallback**: 환경변수 `LLM_GATEWAY_URL` / `LLM_GATEWAY_KEY`
+3. **gateway 없음**: AWS Bedrock Converse (boto3 자격증명). 모델은 `GRAPHIFY_LLM_MODEL` 등 — 상세는 [graph/README.md](./graph/README.md)
+
+```bash
+cd agent-wiki/graph
+python -m pip install -r requirements.txt
+python run_pipeline.py --user user01          # 증분: delta export + queue extract
+python run_pipeline.py --user user01 --full   # corpus 재구축 + 미캐시 재추출
+# 단계별
+python export_corpus.py --user user01
+python run_extract.py --from-queue           # 또는 전체: run_extract.py
+python publish_out.py --user user01
+```
+
+앱에서도 Settings로 Knowledge Graph를 켠 뒤 `POST /api/graph/rebuild`로 백그라운드 추출을 걸 수 있습니다 (`graph_jobs.py`, 쿨다운·지문 스킵 포함).
+
+**입력은 대화 turn 마크다운**입니다. 폴더·PDF 일괄 추출은 아래 [Wiki Graph](#wiki-graph)를 사용합니다. 시각화·문서검색 UI는 [Graph](#graph)를 참고하세요.
+
 
 ### 설치 · 기동
 

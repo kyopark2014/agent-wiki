@@ -69,5 +69,6 @@ markitdown[pptx]
 reportlab
 pypdf
 pdfplumber
+pymupdf
 browser-use[cli]
 graphifyy

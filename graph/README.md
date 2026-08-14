@@ -89,6 +89,21 @@ flowchart TB
 | 2. corpus → graph.json | `run_extract.py` | **LiteLLM** (기본 `claude-haiku-4-5`) |
 | 3. 사용자별 HTML | `publish_out.py` | 없음 (클러스터 + rich UI) |
 
+### Wiki Sync (앱 Settings → Wiki → Sync)
+
+에이전트 스킬이 아니라 **이 폴더의 고정 파이프라인**입니다 (`wiki_jobs`가 subprocess로 실행).
+
+| 스크립트 | 역할 |
+|----------|------|
+| `sync_wiki.py` | detect → AST → 시맨틱 → cluster → `app-graph.html` |
+| `pdf2text.py` | PDF→텍스트 (pdfplumber/pypdf 또는 Foundation Model Parser) |
+
+```bash
+cd agent-wiki
+python graph/sync_wiki.py --user ksdyb
+python graph/sync_wiki.py --user ksdyb --full
+```
+
 한 번에:
 
 ```bash

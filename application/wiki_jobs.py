@@ -22,9 +22,7 @@ logger = logging.getLogger("wiki_jobs")
 
 _APPLICATION_DIR = Path(__file__).resolve().parent
 _GRAPH_DIR = _APPLICATION_DIR.parent / "graph"
-_SYNC_SCRIPT = (
-    _APPLICATION_DIR / "skills" / "graphify" / "scripts" / "sync_wiki.py"
-)
+_SYNC_SCRIPT = _GRAPH_DIR / "sync_wiki.py"
 
 _lock = threading.Lock()
 _running_users: set[str] = set()

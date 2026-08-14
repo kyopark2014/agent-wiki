@@ -7,9 +7,9 @@ build → HTML/JSON, with LiteLLM/Bedrock semantic extraction via agent-wiki
 graph/lib.
 
 Usage:
-    python sync_wiki.py --user alice
-    python sync_wiki.py --user alice --full
-    python sync_wiki.py --user alice --input /path/to/docs
+    python graph/sync_wiki.py --user alice
+    python graph/sync_wiki.py --user alice --full
+    python graph/sync_wiki.py --user alice --input /path/to/docs
 """
 
 from __future__ import annotations
@@ -22,15 +22,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_SCRIPTS_DIR = Path(__file__).resolve().parent
-_APPLICATION_DIR = _SCRIPTS_DIR.parents[2]
-_REPO_ROOT = _APPLICATION_DIR.parent
-_GRAPH_DIR = _REPO_ROOT / "graph"
+_GRAPH_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _GRAPH_DIR.parent
+_APPLICATION_DIR = _REPO_ROOT / "application"
 
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 if str(_GRAPH_DIR) not in sys.path:
     sys.path.insert(0, str(_GRAPH_DIR))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+if str(_APPLICATION_DIR) not in sys.path:
+    sys.path.insert(0, str(_APPLICATION_DIR))
 
 _CODE_EXTS = {
     ".py", ".ts", ".js", ".jsx", ".tsx", ".go", ".rs", ".java", ".cpp", ".c",
@@ -173,6 +174,85 @@ def _merge_detections(parts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _wiki_manifest_path(out: Path) -> Path:
+    return out / "manifest.json"
+
+
+def _detect_incremental_targets(
+    targets: list[Path], *, manifest_path: Path
+) -> dict[str, Any]:
+    """Incremental detect across one or more source folders with a shared manifest.
+
+    Upstream ``detect_incremental(root)`` treats every file outside *root* as
+    deleted when the manifest is shared. We detect each target, merge corpora,
+    then diff against the wiki-level manifest once.
+    """
+    from graphify.detect import detect, load_manifest
+
+    parts: list[dict[str, Any]] = []
+    for target in targets:
+        print(f"[wiki sync] incremental detect on {target}", flush=True)
+        part = detect(target)
+        parts.append(part)
+        print(
+            f"  → {int(part.get('total_files') or 0)} files · "
+            f"~{part.get('total_words', 0)} words",
+            flush=True,
+        )
+
+    merged = _merge_detections(parts)
+    manifest = load_manifest(str(manifest_path))
+
+    file_map = merged.get("files") or {}
+    if not manifest:
+        merged["incremental"] = True
+        merged["new_files"] = {k: list(v) for k, v in file_map.items()}
+        merged["unchanged_files"] = {k: [] for k in file_map}
+        merged["new_total"] = int(merged.get("total_files") or 0)
+        merged["deleted_files"] = []
+        return merged
+
+    new_files: dict[str, list[str]] = {k: [] for k in file_map}
+    unchanged_files: dict[str, list[str]] = {k: [] for k in file_map}
+    for ftype, file_list in file_map.items():
+        for f in file_list or []:
+            stored_mtime = manifest.get(f)
+            try:
+                current_mtime = Path(f).stat().st_mtime
+            except OSError:
+                current_mtime = 0
+            if stored_mtime is None or current_mtime > stored_mtime:
+                new_files[ftype].append(f)
+            else:
+                unchanged_files[ftype].append(f)
+
+    current_files = {f for flist in file_map.values() for f in (flist or [])}
+    deleted_files = [f for f in manifest if f not in current_files]
+    new_total = sum(len(v) for v in new_files.values())
+
+    merged["incremental"] = True
+    merged["new_files"] = new_files
+    merged["unchanged_files"] = unchanged_files
+    merged["new_total"] = new_total
+    merged["deleted_files"] = deleted_files
+    return merged
+
+
+def _save_wiki_manifest(out: Path, files: dict[str, list] | None) -> None:
+    """Persist mtimes for all corpus files under the wiki graphify-out manifest."""
+    from graphify.detect import save_manifest
+
+    payload = files or {}
+    try:
+        save_manifest(payload, str(_wiki_manifest_path(out)))
+    except TypeError:
+        # Older graphifyy: save_manifest(files) only → cwd-relative default path.
+        os.chdir(out.parent)
+        save_manifest(payload)
+    except Exception as exc:
+        print(f"[wiki sync] WARNING: could not save manifest: {exc}", flush=True)
+
+
 def _empty_extract() -> dict[str, Any]:
     return {
         "nodes": [],
@@ -313,34 +393,28 @@ def _clear_wiki_converted(wiki_converted: Path) -> None:
     wiki_converted.mkdir(parents=True, exist_ok=True)
 
 
-def _pdf_to_text(path: Path) -> str:
-    """Extract plain text from a PDF for semantic staging."""
-    try:
-        import pdfplumber
+def _pdf_to_text(
+    path: Path,
+    *,
+    use_foundation_model: bool = False,
+    work_dir: Path | None = None,
+) -> str:
+    """Extract text from a PDF for semantic staging (see ``pdf2text.py``)."""
+    from pdf2text import pdf_to_text
 
-        parts: list[str] = []
-        with pdfplumber.open(path) as pdf:
-            for i, page in enumerate(pdf.pages, 1):
-                text = (page.extract_text() or "").strip()
-                if text:
-                    parts.append(f"## Page {i}\n\n{text}")
-        if parts:
-            return "\n\n".join(parts)
-    except Exception as exc:
-        print(f"  pdfplumber failed for {path.name}: {exc}; trying pypdf")
-
-    from pypdf import PdfReader
-
-    reader = PdfReader(str(path))
-    parts = []
-    for i, page in enumerate(reader.pages, 1):
-        text = (page.extract_text() or "").strip()
-        if text:
-            parts.append(f"## Page {i}\n\n{text}")
-    return "\n\n".join(parts)
+    return pdf_to_text(
+        path,
+        use_foundation_model=use_foundation_model,
+        work_dir=work_dir,
+    )
 
 
-def _doc_to_markdown_body(src: Path) -> str | None:
+def _doc_to_markdown_body(
+    src: Path,
+    *,
+    use_foundation_model: bool = False,
+    pdf_work_dir: Path | None = None,
+) -> str | None:
     """Return markdown/plain text body for semantic extraction, or None if unsupported."""
     suffix = src.suffix.lower()
     if suffix == ".md":
@@ -348,7 +422,11 @@ def _doc_to_markdown_body(src: Path) -> str | None:
     if suffix in {".txt", ".text", ".rst", ".markdown"}:
         return src.read_text(encoding="utf-8", errors="replace")
     if suffix == ".pdf":
-        body = _pdf_to_text(src).strip()
+        body = _pdf_to_text(
+            src,
+            use_foundation_model=use_foundation_model,
+            work_dir=pdf_work_dir,
+        ).strip()
         if not body:
             raise ValueError(f"PDF에서 텍스트를 추출하지 못했습니다: {src}")
         return f"# {src.stem}\n\nSource: `{src}`\n\n{body}"
@@ -380,7 +458,10 @@ def _chunk_text(text: str, *, max_chars: int = 10000) -> list[str]:
 
 
 def _stage_docs_as_markdown(
-    files: list[Path], stage: Path
+    files: list[Path],
+    stage: Path,
+    *,
+    use_foundation_model: bool = False,
 ) -> dict[str, str]:
     """Copy/convert docs into ``stage`` as ``.md`` files.
 
@@ -388,6 +469,9 @@ def _stage_docs_as_markdown(
     """
     path_map: dict[str, str] = {}
     used_names: set[str] = set()
+    pdf_pages_root = stage / ".pdf_pages"
+    if use_foundation_model:
+        pdf_pages_root.mkdir(parents=True, exist_ok=True)
 
     def _unique(name: str) -> str:
         if name not in used_names:
@@ -418,8 +502,22 @@ def _stage_docs_as_markdown(
         except OSError:
             pass
 
+        pdf_work: Path | None = None
+        if use_foundation_model and suffix == ".pdf":
+            # Keep page PNGs + progressive extracted.md under converted/.pdf_pages
+            import hashlib
+
+            digest = hashlib.sha256(original.encode()).hexdigest()[:8]
+            pdf_work = pdf_pages_root / f"{src.stem}_{digest}"
+            pdf_work.mkdir(parents=True, exist_ok=True)
+            (pdf_work / "source_path.txt").write_text(original + "\n", encoding="utf-8")
+
         try:
-            body = _doc_to_markdown_body(src)
+            body = _doc_to_markdown_body(
+                src,
+                use_foundation_model=use_foundation_model,
+                pdf_work_dir=pdf_work,
+            )
         except Exception as exc:
             print(f"  WARNING: failed to convert {src}: {exc}")
             continue
@@ -456,6 +554,97 @@ def _stage_docs_as_markdown(
             path_map[str(dest.resolve())] = original
 
     return path_map
+
+
+def _incomplete_foundation_pdfs(
+    stage: Path, *, candidates: list[Path] | None = None
+) -> list[Path]:
+    """PDFs with partial ``.pdf_pages/.../extracted.md`` that should be resumed."""
+    import hashlib
+
+    from pdf2text import _EXTRACTED_NAME, _pages_done_in_md
+
+    root = stage / ".pdf_pages"
+    if not root.is_dir():
+        return []
+
+    cand_by_key: dict[str, Path] = {}
+    for c in candidates or []:
+        p = Path(c)
+        if not p.is_file() or p.suffix.lower() != ".pdf":
+            continue
+        try:
+            resolved = p.resolve()
+        except OSError:
+            continue
+        digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:8]
+        cand_by_key[f"{resolved.stem}_{digest}"] = resolved
+
+    found: list[Path] = []
+    seen: set[str] = set()
+    for work in sorted(root.iterdir()):
+        if not work.is_dir():
+            continue
+        marker = work / "source_path.txt"
+        src: Path | None = None
+        if marker.is_file():
+            raw = marker.read_text(encoding="utf-8", errors="replace").strip()
+            if raw:
+                src = Path(raw)
+        if src is None or not src.is_file():
+            src = cand_by_key.get(work.name)
+            if src is not None:
+                marker.write_text(str(src.resolve()) + "\n", encoding="utf-8")
+        if src is None or not src.is_file():
+            continue
+        try:
+            key = str(src.resolve())
+        except OSError:
+            key = str(src)
+        if key in seen:
+            continue
+        pages_dir = work / "pages"
+        pngs = (
+            sorted(pages_dir.glob("page_*.png")) if pages_dir.is_dir() else []
+        )
+        done = _pages_done_in_md(work / _EXTRACTED_NAME)
+        if not pngs and not done:
+            continue
+        if not done or (pngs and len(done) < len(pngs)):
+            seen.add(key)
+            found.append(src)
+            print(
+                f"  [foundation model] resume pending: {src.name} "
+                f"({len(done)}/{len(pngs) or '?'} pages in extracted.md)",
+                flush=True,
+            )
+    return found
+
+
+def _merge_doc_files_with_resumes(
+    doc_files: list[str],
+    *,
+    out: Path,
+    use_foundation_model: bool,
+    candidates: list[str] | None = None,
+) -> list[str]:
+    if not use_foundation_model:
+        return doc_files
+    stage = _wiki_converted_dir(out)
+    cand_paths = [Path(p) for p in (candidates or [])] + [
+        Path(p) for p in doc_files
+    ]
+    pending = _incomplete_foundation_pdfs(stage, candidates=cand_paths)
+    if not pending:
+        return doc_files
+    merged = list(doc_files)
+    have = {str(Path(p).resolve()) for p in doc_files if Path(p).is_file()}
+    for src in pending:
+        key = str(src.resolve())
+        if key not in have:
+            merged.append(str(src))
+            have.add(key)
+    return merged
 
 
 def _rewrite_extract_sources(
@@ -540,7 +729,13 @@ def _run_ast(code_files: list[str], out: Path) -> dict[str, Any]:
     return result
 
 
-def _run_semantic(doc_files: list[str], *, out: Path, deep: bool) -> dict[str, Any]:
+def _run_semantic(
+    doc_files: list[str],
+    *,
+    out: Path,
+    deep: bool,
+    use_foundation_model: bool = False,
+) -> dict[str, Any]:
     from lib.semantic import extract_corpus  # type: ignore
 
     files = [Path(f) for f in doc_files if Path(f).is_file()]
@@ -555,11 +750,15 @@ def _run_semantic(doc_files: list[str], *, out: Path, deep: bool) -> dict[str, A
     stage = _wiki_converted_dir(out)
     stage.mkdir(parents=True, exist_ok=True)
     try:
+        mode = "foundation-model" if use_foundation_model else "pdfplumber/pypdf"
         print(
-            f"[wiki sync] staging {len(files)} doc/paper file(s) as markdown → {stage}",
+            f"[wiki sync] staging {len(files)} doc/paper file(s) as markdown → {stage} "
+            f"(pdf parser: {mode})",
             flush=True,
         )
-        path_map = _stage_docs_as_markdown(files, stage)
+        path_map = _stage_docs_as_markdown(
+            files, stage, use_foundation_model=use_foundation_model
+        )
         staged_mds = list(path_map.keys())
         if not staged_mds:
             result = _empty_extract()
@@ -683,14 +882,15 @@ def _build_from_extract(
 
 
 def _try_save_manifest(target: Path, detection: dict[str, Any]) -> None:
-    from graphify.detect import save_manifest
+    """Deprecated helper — prefer ``_save_wiki_manifest``."""
+    _ = target
+    files = detection.get("files") if isinstance(detection, dict) else None
+    if isinstance(files, dict):
+        # Best-effort: write beside wiki after chdir in run_sync.
+        from graphify.detect import save_manifest
 
-    for args in ((target,), (detection,), (target, detection)):
         try:
-            save_manifest(*args)  # type: ignore[misc]
-            return
-        except TypeError:
-            continue
+            save_manifest(files)
         except Exception:
             return
 
@@ -723,22 +923,24 @@ def run_sync(
 
     from graphify.build import build_from_json
     from graphify.cluster import cluster
-    from graphify.detect import detect, detect_incremental
+    from graphify.detect import detect
     from networkx.readwrite import json_graph
 
     graph_json = out / "graph.json"
     wiki_converted = _wiki_converted_dir(out)
+    manifest_path = _wiki_manifest_path(out)
     use_incremental = (
-        not full
-        and graph_json.is_file()
-        and (out / "manifest.json").is_file()
-        and len(targets) == 1
+        not full and graph_json.is_file() and manifest_path.is_file()
     )
 
     if use_incremental:
-        target = targets[0]
-        print(f"[wiki sync] incremental update on {target}", flush=True)
-        detection = detect_incremental(target)
+        print(
+            f"[wiki sync] incremental update on {len(targets)} source(s)",
+            flush=True,
+        )
+        detection = _detect_incremental_targets(
+            targets, manifest_path=manifest_path
+        )
         (out / ".graphify_incremental.json").write_text(
             json.dumps(detection, indent=2), encoding="utf-8"
         )
@@ -749,8 +951,8 @@ def run_sync(
             return {
                 "status": "unchanged",
                 "wiki": str(wiki),
-                "input": str(target),
-                "inputs": [str(target)],
+                "input": input_label,
+                "inputs": [str(t) for t in targets],
                 "exists": graph_json.is_file(),
             }
         print(f"{new_total} new/changed file(s) to re-extract.", flush=True)
@@ -773,9 +975,11 @@ def run_sync(
             "images",
         )
     else:
-        if not full and len(targets) > 1:
+        if full:
+            print("[wiki sync] full re-detect/extract requested", flush=True)
+        elif not graph_json.is_file() or not manifest_path.is_file():
             print(
-                "[wiki sync] multiple source folders — running full detect/extract",
+                "[wiki sync] no prior graph/manifest — running full detect/extract",
                 flush=True,
             )
         parts: list[dict[str, Any]] = []
@@ -817,12 +1021,33 @@ def run_sync(
 
     print("[wiki sync] AST extract…", flush=True)
     ast = _run_ast(code_files, out)
-    if code_only and use_incremental:
+    from application import utils as app_utils
+
+    use_foundation_model = app_utils.is_foundation_model_parser_enabled(user_id)
+    if use_foundation_model:
+        print(
+            "[wiki sync] Foundation Model Parser enabled — PDF→images→LLM",
+            flush=True,
+        )
+        doc_files = _merge_doc_files_with_resumes(
+            doc_files,
+            out=out,
+            use_foundation_model=True,
+            candidates=_files_from_detect(
+                detection, "paper", "papers", "document", "docs"
+            ),
+        )
+    if code_only and use_incremental and not doc_files:
         print("[graphify update] Code-only changes - skipping semantic extraction", flush=True)
         sem = _empty_extract()
     else:
         print("[wiki sync] semantic extract…", flush=True)
-        sem = _run_semantic(doc_files, out=out, deep=deep)
+        sem = _run_semantic(
+            doc_files,
+            out=out,
+            deep=deep,
+            use_foundation_model=use_foundation_model,
+        )
 
     merged = _merge_extracts(ast, sem)
     (out / ".graphify_extract.json").write_text(
@@ -876,8 +1101,7 @@ def run_sync(
         print("[wiki sync] build graph + cluster + export…", flush=True)
         _build_from_extract(merged, detection, out=out, input_label=input_label)
 
-    for target in targets:
-        _try_save_manifest(target, detection)
+    _save_wiki_manifest(out, detection.get("files") if isinstance(detection, dict) else None)
 
     return {
         "status": "ready",

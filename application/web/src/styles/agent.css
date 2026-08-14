@@ -2068,6 +2068,47 @@ button.config-popover-choice.is-selected {
   color: var(--text-muted);
 }
 
+.wiki-configure-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.wiki-configure-toggle-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* `.modal input` is for text fields — do not stretch checkboxes. */
+.wiki-configure-modal .wiki-configure-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .wiki-configure-docs {
   margin-bottom: 18px;
 }
