@@ -154,6 +154,24 @@ export function useFileUpload({ disabled = false }: UseFileUploadOptions = {}) {
     [disabled],
   );
 
+  const uploadWikiFiles = useCallback(
+    async (files: File[], onComplete?: (message: string) => void) => {
+      if (files.length === 0 || disabled || uploadingRef.current) return;
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const result = await fileUploadService.uploadToWiki(files);
+        onComplete?.(result.message);
+      } catch (err) {
+        console.error("Wiki document upload failed", err);
+        setUploadError("Wiki 업로드에 실패했습니다. 다시 시도해 주세요.");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [disabled],
+  );
+
   const removeAttachment = useCallback((url: string) => {
     setAttachments((prev) => {
       const next: AttachedImage[] = [];
@@ -235,6 +253,7 @@ export function useFileUpload({ disabled = false }: UseFileUploadOptions = {}) {
     clearUploadError,
     uploadImageFiles,
     uploadRagFile,
+    uploadWikiFiles,
     removeAttachment,
     clearAttachments,
     onDragEnter,

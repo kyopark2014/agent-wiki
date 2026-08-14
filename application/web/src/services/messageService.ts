@@ -51,6 +51,18 @@ export function buildRagUploadNotice(taskId: string, message: string): Message {
   };
 }
 
+export function buildWikiUploadNotice(taskId: string, message: string): Message {
+  return {
+    id: `wiki-upload-${randomUUID()}`,
+    task_id: taskId,
+    role: "assistant",
+    content: message,
+    images: [],
+    tool_events: [],
+    created_at: new Date().toISOString(),
+  };
+}
+
 export function buildPendingAssistantMessage(
   taskId: string,
   content: string,

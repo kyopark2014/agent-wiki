@@ -27,4 +27,32 @@ export const fileUploadService = {
       throw toUploadError("RAG upload failed", cause);
     }
   },
+
+  async uploadToWiki(files: File[]): Promise<{ message: string }> {
+    try {
+      const result = await api.uploadWikiRawFiles(files);
+      const names = (result.saved || []).map((s) => s.name).join(", ");
+      let message =
+        `문서 ${result.count}개를 wiki/raw에 업로드했습니다` +
+        (names ? ` (${names})` : "") +
+        ".";
+      try {
+        const sync = await api.syncWiki(false);
+        if (sync.status === "error") {
+          message += ` Wiki Sync 실패: ${sync.error || "알 수 없는 오류"}`;
+        } else if (sync.status === "unchanged") {
+          message += " 변경된 파일이 없습니다.";
+        } else {
+          message += " Wiki Sync를 시작합니다.";
+        }
+      } catch (syncErr) {
+        const detail =
+          syncErr instanceof Error ? syncErr.message : String(syncErr);
+        message += ` Wiki Sync 시작 실패: ${detail}`;
+      }
+      return { message };
+    } catch (cause) {
+      throw toUploadError("Wiki upload failed", cause);
+    }
+  },
 };
