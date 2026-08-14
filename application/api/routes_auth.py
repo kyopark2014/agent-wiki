@@ -266,6 +266,17 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
         except Exception:
             logger.exception("Failed to ensure wiki dir for %s", user_id)
         _kick_graph_job(user_id)
+        try:
+            from application import task_store
+
+            task_store.record_login(
+                user_id,
+                method="google",
+                name=(idinfo.get("name") or None),
+                picture=(idinfo.get("picture") or None),
+            )
+        except Exception:
+            logger.exception("Failed to record Google login event")
         logger.info("Google login success: %s (llm_gateway_ready=%s)", user_id, gateway_ready)
         return _session_response(
             user_id,
@@ -293,6 +304,12 @@ def set_session(body: SessionRequest, request: Request, response: Response) -> S
         except Exception:
             logger.exception("Failed to ensure wiki dir for %s", local_user_id)
         _kick_graph_job(local_user_id)
+        try:
+            from application import task_store
+
+            task_store.record_login(local_user_id, method="local")
+        except Exception:
+            logger.exception("Failed to record local login event")
         logger.info(
             "Local auth bypass login: %s (llm_gateway_ready=%s)",
             local_user_id,

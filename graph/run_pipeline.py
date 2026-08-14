@@ -78,16 +78,19 @@ def main() -> None:
     incremental = bool(args.user) and not args.full and not args.per_user
 
     if args.user and not args.no_session_storage:
-        from lib.config import configure_user_session_dirs, graphify_out_dir
+        from lib.config import configure_user_session_dirs, graphify_out_dir, resolve_tasks_db_for_user
 
         paths = configure_user_session_dirs(args.user)
         # Child processes must see the redirected dirs (graphify-out ≡ out).
         env["CORPUS_DIR"] = str(paths["corpus"])
         env["GRAPHIFY_OUT_DIR"] = str(paths["out"])
         env["OUT_DIR"] = str(paths["out"])
+        if "TASKS_DB_PATH" not in env:
+            env["TASKS_DB_PATH"] = str(resolve_tasks_db_for_user(args.user))
         print(f"Session graph workspace: {paths['root']}")
         print(f"  corpus → {paths['corpus']}")
         print(f"  out    → {paths['out']}  (extract + publish)")
+        print(f"  db     → {env['TASKS_DB_PATH']}")
         if incremental:
             print("  mode   → incremental (delta export + extract queue)")
         elif args.full:

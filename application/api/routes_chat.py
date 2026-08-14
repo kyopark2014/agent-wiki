@@ -357,10 +357,11 @@ def _spawn_late_persist(
                 task_id,
                 "assistant",
                 final_content,
+                user_id=user_id,
                 images=images,
                 tool_events=events,
             )
-            flush_persist()
+            flush_persist(user_id)
             _kick_graph_job(user_id)
         except Exception:
             logger.exception("Late persist failed")
@@ -436,7 +437,7 @@ def chat_stream(task_id: str, body: ChatRequest, request: Request):
         memoryEnabled=task["memory_enabled"],
     )
 
-    task_store.add_message(task_id, "user", prompt, images=files)
+    task_store.add_message(task_id, "user", prompt, user_id=user_id, images=files)
 
     message_queue: queue.Queue = queue.Queue()
     result_holder: dict[str, Any] = {"content": "", "images": []}
@@ -479,7 +480,9 @@ def chat_stream(task_id: str, body: ChatRequest, request: Request):
                         AGENT_STREAM_TIMEOUT_SECONDS,
                     )
                     error_text = "Agent timeout"
-                    task_store.add_message(task_id, "assistant", f"Error: {error_text}")
+                    task_store.add_message(
+                        task_id, "assistant", f"Error: {error_text}", user_id=user_id
+                    )
                     yield _sse_event({"type": "error", "data": error_text})
                     yield _sse_event(
                         {"type": "done", "content": f"Error: {error_text}", "images": []}
@@ -518,7 +521,9 @@ def chat_stream(task_id: str, body: ChatRequest, request: Request):
 
             if "error" in result_holder:
                 error_text = f"Error: {result_holder['error']}"
-                task_store.add_message(task_id, "assistant", error_text)
+                task_store.add_message(
+                    task_id, "assistant", error_text, user_id=user_id
+                )
                 yield _sse_event({"type": "error", "data": result_holder["error"]})
                 yield _sse_event({"type": "done", "content": error_text, "images": []})
                 return
@@ -533,6 +538,7 @@ def chat_stream(task_id: str, body: ChatRequest, request: Request):
                 task_id,
                 "assistant",
                 final_content,
+                user_id=user_id,
                 images=images,
                 tool_events=events,
             )
@@ -566,7 +572,7 @@ def chat_stream(task_id: str, body: ChatRequest, request: Request):
             raise
         finally:
             if not sse_closed_early:
-                flush_persist()
+                flush_persist(user_id)
                 if should_kick_graph:
                     _kick_graph_job(user_id)
 

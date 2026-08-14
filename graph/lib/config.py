@@ -37,6 +37,21 @@ def tasks_db_path() -> Path:
     return _resolve(os.getenv("TASKS_DB_PATH", str(DEFAULT_DB)))
 
 
+def resolve_tasks_db_for_user(user_id: str) -> Path:
+    """Prefer per-user working/durable DB; fall back to shared legacy tasks.db."""
+    load_env()
+    if os.getenv("TASKS_DB_PATH"):
+        return tasks_db_path()
+    segment = _user_path_segment(user_id)
+    working = AGENT_WIKI / "application" / "data" / "users" / f"{segment}.db"
+    if working.is_file() and working.stat().st_size > 0:
+        return working.resolve()
+    durable = session_storage_dir() / segment / f"{segment}.db"
+    if durable.is_file() and durable.stat().st_size > 0:
+        return durable.resolve()
+    return tasks_db_path()
+
+
 def corpus_dir() -> Path:
     load_env()
     return _resolve(os.getenv("CORPUS_DIR", str(DEFAULT_CORPUS)))
