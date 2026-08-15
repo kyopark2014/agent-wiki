@@ -610,6 +610,37 @@ const PHYSICS_BASE = {{
   }}
 }};
 
+const PHYSICS_SETTLE = SPARSE_GRAPH ? {{
+  // Force Atlas barely moves on wiki-scale isolate-heavy graphs; use Barnes-Hut
+  // for opening settle + user relayout so fit/재정렬 are visibly effective.
+  enabled: true,
+  solver: 'barnesHut',
+  barnesHut: {{
+    gravitationalConstant: -12000,
+    centralGravity: 0.18,
+    springLength: 95,
+    springConstant: 0.05,
+    damping: 0.42,
+    avoidOverlap: 0.45
+  }},
+  stabilization: {{
+    enabled: false,
+    iterations: STAB_ITERS,
+    updateInterval: 25,
+    fit: false
+  }}
+}} : null;
+
+function physicsForLiveSettle() {{
+  if (PHYSICS_SETTLE) return Object.assign({{}}, PHYSICS_SETTLE);
+  return Object.assign({{}}, PHYSICS_BASE, {{
+    enabled: true,
+    stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
+  }});
+}}
+
+
+
 
 function stopPhysics() {{
   if (!network) return;
@@ -645,14 +676,18 @@ function fitView() {{
   const doFit = () => {{
     try {{
       network.redraw();
-      network.fit({{
-        animation: {{ duration: 350, easingFunction: 'easeInOutQuad' }},
-        padding: 48
-      }});
-      const scale = network.getScale();
-      if (!Number.isFinite(scale) || scale < 0.05) {{
-        network.moveTo({{ scale: 0.35, position: {{ x: 0, y: 0 }}, animation: false }});
+      // Prefer a hard fit first — animated fit is a no-op when the camera
+      // already matches a huge isolate cloud (common on wiki graphs).
+      network.fit({{ animation: false, padding: 56 }});
+      let scale = network.getScale();
+      if (!Number.isFinite(scale) || scale < 0.04 || scale > 8) {{
+        network.moveTo({{ scale: 0.45, position: {{ x: 0, y: 0 }}, animation: false }});
+        scale = network.getScale();
       }}
+      network.fit({{
+        animation: {{ duration: 400, easingFunction: 'easeInOutQuad' }},
+        padding: 56
+      }});
     }} catch (e) {{}}
   }};
   doFit();
@@ -822,15 +857,10 @@ function beginLiveSettle(onDone) {{
   if (!network) return;
   cancelSettle();
   const gen = settleGen;
-  // Always re-apply full solver options. Partial physics setOptions can leave
-  // forceAtlas2Based in a dead state on sparse graphs (wiki).
   network.setOptions({{
     groups: {{ useDefaultGroups: false }},
     layout: {{ improvedLayout: false }},
-    physics: Object.assign({{}}, PHYSICS_BASE, {{
-      enabled: true,
-      stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
-    }})
+    physics: physicsForLiveSettle()
   }});
   try {{ network.startSimulation(); }} catch (e) {{}}
   // Time-box only — do not use 'stabilized' (fires too early on sparse graphs).
@@ -873,19 +903,15 @@ function stabilize() {{
     id: n.id,
     x: (Math.random() - 0.5) * spread,
     y: (Math.random() - 0.5) * spread,
-    fixed: false,
-    color: {{
-      background: n.color,
-      border: darkenColor(n.color, 0.3),
-      highlight: {{ background: lightenColor(n.color, 0.2), border: '#ffffff' }},
-      hover: {{ background: lightenColor(n.color, 0.1), border: '#ffffff' }}
-    }},
-    shadow: {{ enabled: true, color: n.color + '66', size: 8, x: 0, y: 0 }}
+    fixed: false
   }})));
   applyNodeVisibility();
   runBatchStabilize(() => {{
     whenCanvasReady(() => {{
-      try {{ network.fit({{ animation: {{ duration: 600 }} }}); }} catch (e) {{}}
+      try {{
+        network.fit({{ animation: false, padding: 56 }});
+        network.fit({{ animation: {{ duration: 500 }} }});
+      }} catch (e) {{}}
     }});
   }});
 }}
