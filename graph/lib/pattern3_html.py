@@ -628,17 +628,79 @@ const PHYSICS_SETTLE = SPARSE_GRAPH ? {{
 }} : null;
 
 function physicsForLiveSettle() {{
+  // User rearrange / opening settle: always prefer Barnes-Hut on sparse graphs.
+  // Force Atlas (pattern1/3) looks "dead" on wiki isolate-heavy graphs even after
+  // setOptions — Neo4j worked because it was barnesHut from the start.
   if (PHYSICS_SETTLE) return Object.assign({{}}, PHYSICS_SETTLE);
-  return Object.assign({{}}, PHYSICS_BASE, {{
+  if (PHYSICS_BASE && PHYSICS_BASE.solver === 'barnesHut') {{
+    return Object.assign({{}}, PHYSICS_BASE, {{
+      enabled: true,
+      stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
+    }});
+  }}
+  // Non-sparse Force Atlas / Holistic: still use a barnesHut rearrange profile
+  // so 전체보기/재정렬 remain visibly effective.
+  return {{
     enabled: true,
-    stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
-  }});
+    solver: 'barnesHut',
+    barnesHut: {{
+      gravitationalConstant: -8000,
+      centralGravity: 0.12,
+      springLength: 110,
+      springConstant: 0.04,
+      damping: 0.4,
+      avoidOverlap: 0.35
+    }},
+    stabilization: {{
+      enabled: false,
+      iterations: STAB_ITERS,
+      updateInterval: 25,
+      fit: false
+    }}
+  }};
+}}
+
+
+
+function safeVisLabel(s) {{
+  // vis-network LabelSplitter builds RegExp from label tokens. Unescaped
+  // "(" in labels like "(INVERTER & SYSTEM MENUS)" throws
+  // "Invalid regular expression: Unterminated group" and breaks layout.
+  return String(s == null ? '' : s)
+    .split('\\n').join(' ')
+    .split('(').join('\\uFF08')
+    .split(')').join('\\uFF09')
+    .split('[').join('\\uFF3B')
+    .split(']').join('\\uFF3D');
+}}
+
+function graphDbg(tag, extra) {{
+  try {{
+    const el = document.getElementById('mynetwork');
+    const payload = Object.assign({{
+      tag,
+      t: Date.now(),
+      hasNetwork: !!network,
+      settleGen,
+      settleTimer: !!settleTimer,
+      nodeCount: typeof rawNodes !== 'undefined' ? rawNodes.length : null,
+      isolateCount: typeof isolateCount !== 'undefined' ? isolateCount : null,
+      sparse: typeof SPARSE_GRAPH !== 'undefined' ? SPARSE_GRAPH : null,
+      canvas: el ? {{ w: el.clientWidth, h: el.clientHeight }} : null,
+      scale: (network && network.getScale) ? network.getScale() : null
+    }}, extra || {{}});
+    console.log('[graph-ctrl]', payload);
+  }} catch (err) {{
+    console.warn('[graph-ctrl] log failed', tag, err);
+  }}
 }}
 
 
 
 
+
 function stopPhysics() {{
+  graphDbg('stopPhysics');
   if (!network) return;
   try {{ network.stopSimulation(); }} catch (e) {{}}
   network.setOptions({{
@@ -666,11 +728,16 @@ function whenCanvasReady(fn) {{
 }}
 
 function fitView() {{
-  if (!network) return;
+  graphDbg('fitView:click');
+  if (!network) {{
+    graphDbg('fitView:abort', {{ reason: 'no-network' }});
+    return;
+  }}
   cancelSettle();
   stopPhysics();
-  const doFit = () => {{
+  const doFit = (phase) => {{
     try {{
+      const before = network.getScale();
       network.redraw();
       // Prefer a hard fit first — animated fit is a no-op when the camera
       // already matches a huge isolate cloud (common on wiki graphs).
@@ -684,10 +751,14 @@ function fitView() {{
         animation: {{ duration: 400, easingFunction: 'easeInOutQuad' }},
         padding: 56
       }});
-    }} catch (e) {{}}
+      graphDbg('fitView:done', {{ phase: phase || 'direct', before, after: network.getScale() }});
+    }} catch (e) {{
+      graphDbg('fitView:error', {{ phase: phase || 'direct', error: String(e) }});
+      console.error('[graph-ctrl] fitView error', e);
+    }}
   }};
-  doFit();
-  whenCanvasReady(doFit);
+  doFit('immediate');
+  whenCanvasReady(() => doFit('whenCanvasReady'));
 }}
 
 function markLegendActive(group) {{
@@ -718,7 +789,7 @@ const visNodes = rawNodes.map(n => {{
   const hubish = (n.degree || 1) >= maxDeg * 0.45;
   return {{
     id: n.id,
-    label: showLabel ? (n.label || short) : '',
+    label: showLabel ? safeVisLabel(n.label || short) : '',
     group: n.group,
     size: n.size,
     color: {{
@@ -748,7 +819,7 @@ const visEdges = rawEdges.map((e, i) => ({{
   id: i,
   from: e.from,
   to: e.to,
-  label: e.label || '',
+  label: safeVisLabel(e.label || ''),
   color: {{
     color: 'rgba(170, 178, 192, 0.45)',
     highlight: 'rgba(230, 234, 240, 0.85)',
@@ -817,25 +888,8 @@ const options = {{
     font: {{ size: 9, align: 'middle', background: '#0d1117', color: '#c8d0dc' }},
     smooth: {{ type: 'dynamic', roundness: 0.3 }}
   }},
-  physics: {{
-    enabled: true,
-    solver: 'forceAtlas2Based',
-    forceAtlas2Based: {{
-      gravitationalConstant: -55,
-      centralGravity: 0.008,
-      springLength: 160,
-      springConstant: 0.05,
-      damping: 0.45,
-      avoidOverlap: 0.9
-    }},
-    // Live settle for all sizes — short batch stabilize freezes circular layouts.
-    stabilization: {{
-      enabled: false,
-      iterations: STAB_ITERS,
-      updateInterval: 25,
-      fit: false
-    }}
-  }},
+  // Sparse wiki graphs: PHYSICS_SETTLE (barnesHut). Else pattern Force Atlas.
+  physics: (PHYSICS_SETTLE || PHYSICS_BASE),
   interaction: {{
     hover: true,
     tooltipDelay: 100,
@@ -849,6 +903,7 @@ const options = {{
 network = new vis.Network(container, networkData, options);
 container.setAttribute('tabindex', '0');
 document.getElementById('fit-view-btn').addEventListener('click', (ev) => {{
+  graphDbg('fit-view-btn:listener');
   ev.preventDefault();
   fitView();
 }});
@@ -881,27 +936,46 @@ network.on('hoverNode', () => {{ container.style.cursor = 'pointer'; }});
 network.on('blurNode', () => {{ container.style.cursor = 'default'; }});
 
 function cancelSettle() {{
+  const prev = settleGen;
   settleGen += 1;
   if (settleTimer) {{
     clearTimeout(settleTimer);
     settleTimer = null;
   }}
+  graphDbg('cancelSettle', {{ prevGen: prev, nextGen: settleGen }});
 }}
 
 function beginLiveSettle(onDone) {{
-  if (!network) return;
+  if (!network) {{
+    graphDbg('beginLiveSettle:abort', {{ reason: 'no-network' }});
+    return;
+  }}
   cancelSettle();
   const gen = settleGen;
+  const phys = physicsForLiveSettle();
+  graphDbg('beginLiveSettle:start', {{
+    gen,
+    ms: LIVE_SETTLE_MS,
+    solver: phys && phys.solver,
+    sparseSettle: !!PHYSICS_SETTLE
+  }});
   network.setOptions({{
     groups: {{ useDefaultGroups: false }},
     layout: {{ improvedLayout: false }},
-    physics: physicsForLiveSettle()
+    physics: phys
   }});
-  try {{ network.startSimulation(); }} catch (e) {{}}
+  try {{ network.startSimulation(); }} catch (e) {{
+    graphDbg('beginLiveSettle:startSimulation-error', {{ error: String(e) }});
+    console.error('[graph-ctrl] startSimulation', e);
+  }}
   // Time-box only — do not use 'stabilized' (fires too early on sparse graphs).
   settleTimer = setTimeout(() => {{
-    if (gen !== settleGen) return;
+    if (gen !== settleGen) {{
+      graphDbg('beginLiveSettle:skip-stale', {{ gen, settleGen }});
+      return;
+    }}
     settleTimer = null;
+    graphDbg('beginLiveSettle:timeout-done', {{ gen }});
     stopPhysics();
     if (typeof onDone === 'function') onDone();
   }}, LIVE_SETTLE_MS);
@@ -932,8 +1006,13 @@ function filterGroup(group) {{
 }}
 
 function stabilize() {{
-  if (!network || typeof networkData === 'undefined') return;
+  graphDbg('stabilize:click');
+  if (!network || typeof networkData === 'undefined') {{
+    graphDbg('stabilize:abort', {{ reason: !network ? 'no-network' : 'no-networkData' }});
+    return;
+  }}
   const spread = Math.max(1000, Math.sqrt(rawNodes.length) * 220);
+  const beforeScale = network.getScale();
   networkData.nodes.update(rawNodes.map(n => ({{
     id: n.id,
     x: (Math.random() - 0.5) * spread,
@@ -941,12 +1020,17 @@ function stabilize() {{
     fixed: false
   }})));
   applyNodeVisibility();
+  graphDbg('stabilize:reseeded', {{ spread, beforeScale }});
   runBatchStabilize(() => {{
     whenCanvasReady(() => {{
       try {{
         network.fit({{ animation: false, padding: 56 }});
         network.fit({{ animation: {{ duration: 500 }} }});
-      }} catch (e) {{}}
+        graphDbg('stabilize:fit-done', {{ afterScale: network.getScale() }});
+      }} catch (e) {{
+        graphDbg('stabilize:fit-error', {{ error: String(e) }});
+        console.error('[graph-ctrl] stabilize fit', e);
+      }}
     }});
   }});
 }}
@@ -967,6 +1051,11 @@ function selectPattern(pattern) {{
 }}
 
 syncIsolateToggleLabel();
+graphDbg('boot', {{
+  pattern: document.querySelector('.pattern-btn.active')?.dataset?.pattern || null,
+  liveMs: typeof LIVE_SETTLE_MS !== 'undefined' ? LIVE_SETTLE_MS : null,
+  settleSolver: PHYSICS_SETTLE ? PHYSICS_SETTLE.solver : (PHYSICS_BASE && PHYSICS_BASE.solver)
+}});
 
 <<<ASK_PANEL_JS>>>
 </script>
