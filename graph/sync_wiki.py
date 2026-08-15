@@ -18,6 +18,15 @@ import argparse
 import json
 import os
 import shutil
+
+
+def _copy_file(src, dst) -> None:
+    """Content-only copy for S3 Files / NFS mounts (no xattr).
+
+    ``shutil.copy2`` calls ``copystat`` → ``os.setxattr``, which fails with
+    Errno 524 (EREMOTEIO) on ``/mnt/app-data`` and similar mounts.
+    """
+    shutil.copy(src, dst)
 import sys
 from pathlib import Path
 from typing import Any
@@ -349,7 +358,7 @@ def _relocate_detect_converted(
             return raw
         dest = _unique_dest(wiki_converted, src.name, used)
         try:
-            shutil.copy2(src, dest)
+            _copy_file(src, dest)
         except OSError as exc:
             print(f"  WARNING: could not copy converted {src} → {dest}: {exc}")
             return raw
@@ -1033,7 +1042,7 @@ def run_sync(
 
     old_backup = out / ".graphify_old.json"
     if use_incremental and graph_json.is_file():
-        shutil.copy2(graph_json, old_backup)
+        _copy_file(graph_json, old_backup)
 
     all_changed = code_files + doc_files
     code_only = bool(all_changed) and all(
