@@ -178,6 +178,27 @@ def _wiki_manifest_path(out: Path) -> Path:
     return out / "manifest.json"
 
 
+def _manifest_mtime(entry: Any) -> float | None:
+    """Normalize manifest entry to an mtime float.
+
+    Older graphify saved ``{path: float}``. Newer graphify (and some pipeline
+    runs) save ``{path: {"mtime": float, "seen": ..., "ast_hash": ...}}``.
+    Comparing a float to a dict raises TypeError — coerce here.
+    """
+    if entry is None:
+        return None
+    if isinstance(entry, (int, float)):
+        return float(entry)
+    if isinstance(entry, dict):
+        raw = entry.get("mtime", entry.get("seen"))
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        return None
+    try:
+        return float(entry)
+    except (TypeError, ValueError):
+        return None
+
 def _detect_incremental_targets(
     targets: list[Path], *, manifest_path: Path
 ) -> dict[str, Any]:
@@ -216,11 +237,11 @@ def _detect_incremental_targets(
     unchanged_files: dict[str, list[str]] = {k: [] for k in file_map}
     for ftype, file_list in file_map.items():
         for f in file_list or []:
-            stored_mtime = manifest.get(f)
+            stored_mtime = _manifest_mtime(manifest.get(f))
             try:
                 current_mtime = Path(f).stat().st_mtime
             except OSError:
-                current_mtime = 0
+                current_mtime = 0.0
             if stored_mtime is None or current_mtime > stored_mtime:
                 new_files[ftype].append(f)
             else:
