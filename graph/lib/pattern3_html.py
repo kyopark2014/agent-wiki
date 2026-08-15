@@ -116,7 +116,10 @@ def to_pattern3_html(
         nid: cid for cid, members in communities.items() for nid in members
     }
     degree = dict(G.degree())
+    # Isolated nodes have degree 0 — avoid ZeroDivisionError on size scale.
     max_deg = max(degree.values()) if degree else 1
+    if max_deg <= 0:
+        max_deg = 1
 
     raw_nodes: list[dict[str, Any]] = []
     descriptions: dict[str, str] = {}

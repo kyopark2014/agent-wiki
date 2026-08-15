@@ -1,7 +1,14 @@
 """
-MCP server for extracting text from images using LLM (AWS Bedrock).
-Based on chat.py summarize_image and extract_text logic.
+Image → Markdown text extraction via AWS Bedrock multimodal.
+
+Used as:
+  - Library helpers for Wiki Sync Foundation Model Parser (``graph/pdf2text.py``)
+  - Optional FastMCP server when ``mcp`` is installed (agent tools)
+
+Based on chat.py summarize_image / extract_text logic.
 """
+from __future__ import annotations
+
 import base64
 import logging
 import os
@@ -14,7 +21,6 @@ import boto3
 from botocore.config import Config
 from langchain_aws import ChatBedrock
 from langchain_core.messages import HumanMessage
-from mcp.server.fastmcp import FastMCP
 from PIL import Image
 
 import info
@@ -35,18 +41,22 @@ profile = models[0]
 model_id = profile["model_id"]
 model_type = profile["model_type"]
 
+mcp = None
 try:
+    from mcp.server.fastmcp import FastMCP
+
     mcp = FastMCP(
         name="text_extraction",
         instructions=(
             "Extract text from images using an LLM. "
-            "Use extract_text_from_image when the user provides an image (base64 or file path) and wants to extract text from it."
+            "Use extract_text_from_image when the user provides an image "
+            "(base64 or file path) and wants to extract text from it."
         ),
     )
     logger.info("Text extraction MCP server initialized successfully")
 except Exception as e:
-    logger.error(f"Error initializing MCP: {str(e)}")
-    raise
+    # Wiki Sync / pdf2text only need the helpers below; MCP is optional.
+    logger.info("Text extraction MCP server not available (library mode): %s", e)
 
 
 def _get_chat():
@@ -109,7 +119,6 @@ def _prepare_image_base64(
         img = img.resize((width, height))
 
     max_attempts = 5
-    base64_size = 0
     for attempt in range(max_attempts):
         buffer = BytesIO()
         img.save(buffer, format="PNG", optimize=True)
@@ -211,7 +220,6 @@ def _parse_result(text: str) -> str:
     return text
 
 
-@mcp.tool()
 def extract_text_from_image(
     image_base64: Optional[str] = None,
     image_path: Optional[str] = None,
@@ -225,12 +233,17 @@ def extract_text_from_image(
     Args:
         image_base64: Base64-encoded image string (without data URL prefix)
         image_path: Path to image file (jpg, png, etc.)
-        prompt: Optional custom prompt for extraction. Default asks for markdown format with <result> tag.
+        prompt: Optional custom prompt for extraction. Default asks for markdown
+            format with <result> tag.
 
     Returns:
         Extracted text from the image in markdown format.
     """
-    logger.info(f"extract_text_from_image called: path={image_path}, prompt={'custom' if prompt else 'default'}")
+    logger.info(
+        "extract_text_from_image called: path=%s, prompt=%s",
+        image_path,
+        "custom" if prompt else "default",
+    )
 
     if not image_base64 and not image_path:
         return "Error: image_base64 또는 image_path 중 하나를 제공해주세요."
@@ -265,5 +278,13 @@ def extract_text_from_image(
         return f"Error: 이미지 텍스트 추출 중 오류 발생: {str(e)}"
 
 
+if mcp is not None:
+    mcp.tool()(extract_text_from_image)
+
+
 if __name__ == "__main__":
+    if mcp is None:
+        raise SystemExit(
+            "mcp package is required to run as a server: pip install mcp"
+        )
     mcp.run(transport="stdio")
