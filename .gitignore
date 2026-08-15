@@ -8,3 +8,7 @@ application/data/
 *.pyc
 graph/corpus/
 graph/out/
+
+# local graphify / wiki build artifacts
+graphify-out/
+application/graphify-out/
