@@ -18,6 +18,7 @@ _MAX_SOURCES = 6
 _MAX_EXCERPT_CHARS = 1800
 _MAX_TOTAL_EXCERPT_CHARS = 8000
 
+
 # Prefer these for excerpts / body search (never dump PDF binary into the UI).
 _TEXT_SUFFIXES = {
     ".md",
@@ -59,6 +60,21 @@ _BINARY_SUFFIXES = {
     ".xlsx",
     ".zip",
 }
+
+_KNOWN_SUFFIXES = _TEXT_SUFFIXES | _BINARY_SUFFIXES
+
+
+def _document_stem(path: Path) -> str:
+    """Stem used to find ``converted/{stem}_part*.md``.
+
+    Extraction sometimes stores ``source_file`` as a bare document title
+    (e.g. ``WB_Troubleshooting Manual_KOR_4.4`` without ``.pdf``). ``Path.stem``
+    would treat ``.4`` as a suffix and look for the wrong converted files.
+    """
+    suffix = path.suffix.lower()
+    if suffix in _KNOWN_SUFFIXES:
+        return path.stem
+    return path.name
 
 
 def _load_graph(path: Path):
@@ -159,20 +175,72 @@ def _find_nodes_by_source_content(
     return out
 
 
+def _source_path_candidates(path: Path) -> list[Path]:
+    """Absolute extract paths may point at another host/mount; try graph-relative forms."""
+    candidates: list[Path] = [path]
+    parts = path.parts
+    for marker in ("corpus", "out", "raw", "graphify-out", "converted"):
+        if marker in parts:
+            idx = parts.index(marker)
+            candidates.append(Path(*parts[idx:]))
+            break
+    name = path.name
+    if name:
+        candidates.append(Path(name))
+        candidates.append(Path("corpus") / name)
+        candidates.append(Path("out") / name)
+        candidates.append(Path("raw") / name)
+        candidates.append(Path("graphify-out") / "converted" / name)
+        stem = _document_stem(path)
+        suffix = path.suffix.lower()
+        if suffix == ".pdf" or suffix not in _KNOWN_SUFFIXES:
+            candidates.append(Path("graphify-out") / "converted" / f"{stem}.md")
+            candidates.append(Path("raw") / f"{stem}.pdf")
+            candidates.append(Path(f"{stem}.pdf"))
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    out: list[Path] = []
+    for cand in candidates:
+        key = str(cand)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cand)
+    return out
+
+
 def _allowed_source(path: Path, roots: list[Path]) -> Path | None:
-    try:
-        resolved = path.expanduser().resolve()
-    except OSError:
-        return None
-    if not resolved.is_file():
-        return None
-    for root in roots:
+    """Resolve source_file under allowed graph roots.
+
+    Extraction stores absolute paths (``/mnt/app-data/...`` or a laptop path).
+    AgentCore Runtime mounts the same tree at ``/mnt/workspace/{user}/graph``,
+    so we remap by ``corpus/`` / ``out/`` suffix or basename when the absolute
+    path is missing.
+    """
+    for cand in _source_path_candidates(path):
         try:
-            resolved.relative_to(root.resolve())
-            return resolved
-        except ValueError:
+            if cand.is_absolute():
+                resolved = cand.expanduser().resolve()
+                if resolved.is_file():
+                    for root in roots:
+                        try:
+                            resolved.relative_to(root.resolve())
+                            return resolved
+                        except ValueError:
+                            continue
+            for root in roots:
+                try:
+                    resolved = (root / cand).expanduser().resolve()
+                    if not resolved.is_file():
+                        continue
+                    resolved.relative_to(root.resolve())
+                    return resolved
+                except (OSError, ValueError):
+                    continue
+        except OSError:
             continue
     return None
+
 
 
 def _looks_binary(raw: bytes) -> bool:
@@ -183,8 +251,14 @@ def _looks_binary(raw: bytes) -> bool:
     sample = raw[:4096]
     if b"\x00" in sample:
         return True
-    # High ratio of non-text bytes → treat as binary
-    textish = sum(1 for b in sample if b in (9, 10, 13) or 32 <= b < 127 or b >= 0xC0)
+    # Count ASCII controls/printables and UTF-8 multibyte bytes. Lead bytes are
+    # >= 0xC0, but continuation bytes are 0x80-0xBF — omitting those falsely
+    # marks Korean/CJK markdown as binary (ratio often ~0.65 < 0.75).
+    textish = sum(
+        1
+        for b in sample
+        if b in (9, 10, 13) or 32 <= b < 127 or b >= 0x80
+    )
     return textish < len(sample) * 0.75
 
 
@@ -192,7 +266,12 @@ def _converted_markdown_for(
     src: Path, roots: list[Path]
 ) -> list[Path]:
     """Find wiki ``graphify-out/converted/{stem}*.md`` sidecars for a binary source."""
-    stem = src.stem
+    stems = [_document_stem(src)]
+    # Also try Path.stem for real extensions (already covered) and bare title edge cases.
+    if src.stem and src.stem not in stems:
+        stems.append(src.stem)
+    if src.name and src.name not in stems:
+        stems.append(src.name)
     dirs: list[Path] = []
     seen: set[str] = set()
 
@@ -212,7 +291,6 @@ def _converted_markdown_for(
         _add_dir(r / "graphify-out" / "converted")
         if r.name == "graphify-out":
             _add_dir(r / "converted")
-        # parent of graph.json is graphify-out
         if (r / "graph.json").is_file():
             _add_dir(r / "converted")
 
@@ -221,20 +299,20 @@ def _converted_markdown_for(
     for d in dirs:
         if not d.is_dir():
             continue
-        exact = d / f"{stem}.md"
-        if exact.is_file():
-            key = str(exact.resolve())
-            if key not in found_keys:
-                found_keys.add(key)
-                found.append(exact)
-        parts = sorted(d.glob(f"{stem}_part*.md"))
-        for p in parts:
-            key = str(p.resolve())
-            if key not in found_keys:
-                found_keys.add(key)
-                found.append(p)
+        for stem in stems:
+            exact = d / f"{stem}.md"
+            if exact.is_file():
+                key = str(exact.resolve())
+                if key not in found_keys:
+                    found_keys.add(key)
+                    found.append(exact)
+            parts = sorted(d.glob(f"{stem}_part*.md"))
+            for p in parts:
+                key = str(p.resolve())
+                if key not in found_keys:
+                    found_keys.add(key)
+                    found.append(p)
     return found
-
 
 def _decode_text(raw: bytes) -> str:
     if len(raw) > _MAX_FILE_BYTES:
@@ -254,7 +332,6 @@ def _read_readable_source(
     allowed = _allowed_source(src, roots)
     suffix = src.suffix.lower()
 
-    # Always try converted sidecars for known binary types (or unknown non-text).
     need_converted = suffix in _BINARY_SUFFIXES or (
         suffix not in _TEXT_SUFFIXES and suffix != ""
     )
@@ -272,7 +349,6 @@ def _read_readable_source(
 
     if allowed is None:
         if converted:
-            # Source PDF outside roots but converted md is under wiki — still OK.
             chunks = []
             for p in converted:
                 try:
@@ -297,6 +373,11 @@ def _read_readable_source(
                 return converted[0], "\n\n".join(chunks), None
         return None, "", str(exc)
 
+    # Known text extensions (.md, .txt, …) are always decoded — do not let the
+    # binary heuristic discard corpus markdown with heavy CJK UTF-8.
+    if suffix in _TEXT_SUFFIXES:
+        return allowed, _decode_text(raw), None
+
     if _looks_binary(raw) or suffix in _BINARY_SUFFIXES:
         if converted:
             chunks = []
@@ -314,6 +395,7 @@ def _read_readable_source(
         )
 
     return allowed, _decode_text(raw), None
+
 
 
 def _paragraphs(text: str) -> list[str]:
@@ -637,9 +719,8 @@ def query_user_graph(
 
         sources_out.append(
             {
-                "path": src,
-                "name": display_name,
-                "text_path": str(readable_path),
+                "path": str(readable_path),
+                "name": readable_path.name if readable_path.suffix.lower() in {".md", ".markdown", ".txt"} else display_name,
                 "readable": True,
                 "matched_labels": [n["label"] for n in file_nodes[:8]],
                 "excerpts": kept,
