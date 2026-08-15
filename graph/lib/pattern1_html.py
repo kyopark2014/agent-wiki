@@ -610,60 +610,17 @@ const PHYSICS_BASE = {{
   }}
 }};
 
-const PHYSICS_SETTLE = SPARSE_GRAPH ? {{
-  // Force Atlas barely moves on wiki-scale isolate-heavy graphs; use Barnes-Hut
-  // for opening settle + user relayout so fit/재정렬 are visibly effective.
-  enabled: true,
-  solver: 'barnesHut',
-  barnesHut: {{
-    gravitationalConstant: -12000,
-    centralGravity: 0.18,
-    springLength: 95,
-    springConstant: 0.05,
-    damping: 0.42,
-    avoidOverlap: 0.45
-  }},
-  stabilization: {{
-    enabled: false,
-    iterations: STAB_ITERS,
-    updateInterval: 25,
-    fit: false
-  }}
-}} : null;
 
 function physicsForLiveSettle() {{
-  // User rearrange / opening settle: always prefer Barnes-Hut on sparse graphs.
-  // Force Atlas (pattern1/3) looks "dead" on wiki isolate-heavy graphs even after
-  // setOptions — Neo4j worked because it was barnesHut from the start.
-  if (PHYSICS_SETTLE) return Object.assign({{}}, PHYSICS_SETTLE);
-  if (PHYSICS_BASE && PHYSICS_BASE.solver === 'barnesHut') {{
-    return Object.assign({{}}, PHYSICS_BASE, {{
-      enabled: true,
-      stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
-    }});
-  }}
-  // Non-sparse Force Atlas / Holistic: still use a barnesHut rearrange profile
-  // so 전체보기/재정렬 remain visibly effective.
-  return {{
+  // Always re-apply this pattern's own solver (FA / Barnes-Hut / Holistic).
+  // Do not swap Force Atlas → Barnes-Hut on sparse graphs — that flattens the
+  // circular FA layout into separate islands. Label crashes were a separate bug
+  // (safeVisLabel); physics should stay true to the selected pattern.
+  return Object.assign({{}}, PHYSICS_BASE, {{
     enabled: true,
-    solver: 'barnesHut',
-    barnesHut: {{
-      gravitationalConstant: -8000,
-      centralGravity: 0.12,
-      springLength: 110,
-      springConstant: 0.04,
-      damping: 0.4,
-      avoidOverlap: 0.35
-    }},
-    stabilization: {{
-      enabled: false,
-      iterations: STAB_ITERS,
-      updateInterval: 25,
-      fit: false
-    }}
-  }};
+    stabilization: Object.assign({{}}, PHYSICS_BASE.stabilization || {{}}, {{ enabled: false }})
+  }});
 }}
-
 
 
 function safeVisLabel(s) {{
@@ -843,8 +800,7 @@ const options = {{
   // Keep community id on nodes for filtering, but never let vis default
   // group palettes override our legend colors (happens after setOptions/relayout).
   groups: {{ useDefaultGroups: false }},
-  // Sparse wiki graphs: PHYSICS_SETTLE (barnesHut). Else pattern Force Atlas.
-  physics: (PHYSICS_SETTLE || PHYSICS_BASE),
+  physics: PHYSICS_BASE,
   interaction: {{
     hover: true,
     tooltipDelay: 120,
@@ -922,7 +878,7 @@ function beginLiveSettle(onDone) {{
     gen,
     ms: LIVE_SETTLE_MS,
     solver: phys && phys.solver,
-    sparseSettle: !!PHYSICS_SETTLE
+    sparseGraph: !!SPARSE_GRAPH
   }});
   network.setOptions({{
     groups: {{ useDefaultGroups: false }},
@@ -1019,7 +975,7 @@ syncIsolateToggleLabel();
 graphDbg('boot', {{
   pattern: document.querySelector('.pattern-btn.active')?.dataset?.pattern || null,
   liveMs: typeof LIVE_SETTLE_MS !== 'undefined' ? LIVE_SETTLE_MS : null,
-  settleSolver: PHYSICS_SETTLE ? PHYSICS_SETTLE.solver : (PHYSICS_BASE && PHYSICS_BASE.solver)
+  settleSolver: PHYSICS_BASE && PHYSICS_BASE.solver
 }});
 
 <<<ASK_PANEL_JS>>>
