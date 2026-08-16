@@ -174,27 +174,6 @@ Graphify T-Box 위치:
 > 💡 이게 Graphify만의 T-Box 차별점이에요! OWL/RDF에는 없는 **신뢰도 메타데이터** 개념이에요.
 
 
-
-
-
-
-
-### Knowledge Graph · Wiki Graph 개요
-
-agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
-
-| | **Knowledge Graph** | **Wiki Graph** |
-|--|---------------------|----------------|
-| 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
-| 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
-| 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
-| API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
-| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
-| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
-| Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
-
-
-
 ### ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
 
 | **LLM Wiki가 유리한 경우** | **RAG가 유리한 경우** |
@@ -209,6 +188,69 @@ agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장
 agent-wiki에서는 **채팅 Agent(필요 시 RAG MCP)** 와 **그래프 문서검색**을 함께 둘 수 있습니다. 그래프 쪽은 임베딩 인덱스 없이 `graph.json` 순회 + 원문 excerpt로 답을 보강합니다.
 
 
+### Graph 
+
+agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
+
+| | **Knowledge Graph** | **Wiki Graph** |
+|--|---------------------|----------------|
+| 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
+| 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
+| 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
+| API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
+| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
+| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
+| Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
+
+### T-Box와 A-Box의 분리 방식
+
+```
+Graphify T-Box                    Graphify A-Box
+────────────────────              ───────────────────────────────────
+"relation" 값 집합                 graph.json의 실제 nodes + edges
+
+contains                           DigestAuth --contains--> .authenticate()
+imports                            auth.py --imports_from--> models
+imports_from                       httpx.py --imports--> ssl
+inherits                           BasicAuth --inherits--> AuthBase
+method                             Client --method--> .send()
+calls       (INFERRED)             .build_request() --calls--> .encode()
+uses        (INFERRED)             DigestAuth --uses--> Response
+```
+
+### Graphify T-Box vs 다른 도구 비교
+
+| 구분 | **Graphify** | **Graphiti** | **OWL/RDF** |
+|---|---|---|---|
+| **T-Box 위치** | `extract.py` 코드 내 하드코딩 | Pydantic 모델 파일 | `.ttl` / `.owl` 파일 |
+| **T-Box 커스터마이즈** | ❌ 소스 수정 필요 | ✅ Pydantic 모델 정의 | ✅ 완전 자유 |
+| **신뢰도 태깅** | ✅ EXTRACTED/INFERRED/AMBIGUOUS | ❌ (temporal validity로 대체) | ❌ |
+| **도메인 추론** | ❌ | ❌ | ✅ HermiT/Pellet |
+| **업데이트 방식** | `--update` (A-Box만) | `add_episode()` 실시간 | 트리플스토어 직접 수정 |
+| **T-Box 안정성** | 버전 업에서만 변경 | 언제든 변경 가능 | 언제든 변경 가능 |
+| **주요 목적** | 코드/문서 구조 이해 | AI 에이전트 메모리 | 시맨틱 웹 표준 |
+
+
+### graph.json 생성 및 활용
+
+아래와 같이 graph.json을 생성고 활용합니다.
+
+① 넣는 방법: graphify . 실행 → 파일 자동 분석 → graph.json 생성
+② 업데이트:  graphify . --update → 변경된 파일만 SHA256 체크 후 증분 머지
+③ 활용:      graphify query / path / explain 또는 graph.json 직접 Python 분석
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   graph.json                        │
+│                                                     │
+│  T-Box: "relation" 값 종류                            │
+│         (calls, contains, inherits ...)             │
+│                                                     │
+│  A-Box: 실제 인스턴스 데이터                             │
+│         nodes: [{id, label, file_type, ...}]        │
+│         links: [{source, target, relation, ...}]    │
+└─────────────────────────────────────────────────────┘
+```
 
 
 
@@ -273,56 +315,6 @@ tasks.db
 | INFERRED | 추론 (보통 0.6–0.9) · HTML에서 점선으로 표시되는 경우 있음 |
 | AMBIGUOUS | 불확실 (0.1–0.3) |
 
-
-### T-Box와 A-Box의 분리 방식
-
-```
-Graphify T-Box                    Graphify A-Box
-────────────────────              ───────────────────────────────────
-"relation" 값 집합                 graph.json의 실제 nodes + edges
-
-contains                           DigestAuth --contains--> .authenticate()
-imports                            auth.py --imports_from--> models
-imports_from                       httpx.py --imports--> ssl
-inherits                           BasicAuth --inherits--> AuthBase
-method                             Client --method--> .send()
-calls       (INFERRED)             .build_request() --calls--> .encode()
-uses        (INFERRED)             DigestAuth --uses--> Response
-```
-
-### Graphify T-Box vs 다른 도구 비교
-
-| 구분 | **Graphify** | **Graphiti** | **OWL/RDF** |
-|---|---|---|---|
-| **T-Box 위치** | `extract.py` 코드 내 하드코딩 | Pydantic 모델 파일 | `.ttl` / `.owl` 파일 |
-| **T-Box 커스터마이즈** | ❌ 소스 수정 필요 | ✅ Pydantic 모델 정의 | ✅ 완전 자유 |
-| **신뢰도 태깅** | ✅ EXTRACTED/INFERRED/AMBIGUOUS | ❌ (temporal validity로 대체) | ❌ |
-| **도메인 추론** | ❌ | ❌ | ✅ HermiT/Pellet |
-| **업데이트 방식** | `--update` (A-Box만) | `add_episode()` 실시간 | 트리플스토어 직접 수정 |
-| **T-Box 안정성** | 버전 업에서만 변경 | 언제든 변경 가능 | 언제든 변경 가능 |
-| **주요 목적** | 코드/문서 구조 이해 | AI 에이전트 메모리 | 시맨틱 웹 표준 |
-
-
-### graph.json
-
-아래와 같이 graph.json을 생성고 활용합니다.
-
-① 넣는 방법: graphify . 실행 → 파일 자동 분석 → graph.json 생성
-② 업데이트:  graphify . --update → 변경된 파일만 SHA256 체크 후 증분 머지
-③ 활용:      graphify query / path / explain 또는 graph.json 직접 Python 분석
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   graph.json                        │
-│                                                     │
-│  T-Box: "relation" 값 종류                            │
-│         (calls, contains, inherits ...)             │
-│                                                     │
-│  A-Box: 실제 인스턴스 데이터                             │
-│         nodes: [{id, label, file_type, ...}]        │
-│         links: [{source, target, relation, ...}]    │
-└─────────────────────────────────────────────────────┘
-```
 
 
 ## Wiki Graph
