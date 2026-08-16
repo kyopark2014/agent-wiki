@@ -1510,6 +1510,334 @@ A-Box 역할 (graph.json에 저장되는 실제 데이터)
 
 
 
+실제 소스 코드를 직접 확인했어요! 이제 Graphify의 T-Box에 대해 **정확하고 완전하게** 설명드릴 수 있어요 😊
 
+---
+
+## 🏗️ Graphify의 T-Box — 정의·활용·업데이트
+
+---
+
+## 1️⃣ 핵심 결론 먼저
+
+> **Graphify의 T-Box는 `extract.py` 소스 코드 안에 하드코딩된 엣지 타입(relation 값) 집합입니다.**
+> OWL/RDF처럼 별도 온톨로지 파일이 없고, 별도 config로 사용자 정의도 안 돼요!
+
+```
+Graphify T-Box 위치:
+  graphify/extract.py 내부의 add_edge() 호출부
+      ↓
+  "relation": "calls" | "imports" | "contains" | "inherits" | ...
+```
+
+---
+
+## 2️⃣ Graphify T-Box의 실제 엣지 타입 전체 목록
+
+소스코드(`extract.py`)에서 직접 확인한 **공식 T-Box**예요:
+
+### 📌 코드 분석용 엣지 타입 (AST 기반 — `EXTRACTED`)
+
+| 엣지 타입 | 신뢰도 | 의미 | 예시 |
+|---|---|---|---|
+| `contains` | EXTRACTED | 파일이 클래스/함수를 포함 | `auth.py` → `DigestAuth` |
+| `imports` | EXTRACTED | 파일이 모듈을 임포트 | `main.py` → `requests` |
+| `imports_from` | EXTRACTED | 파일이 특정 모듈에서 임포트 | `auth.py` → `models` |
+| `inherits` | EXTRACTED | 클래스가 부모 클래스를 상속 | `DigestAuth` → `Auth` |
+| `method` | EXTRACTED | 클래스가 메서드를 보유 | `DigestAuth` → `.authenticate()` |
+
+### 📌 코드 분석용 엣지 타입 (Call Graph — `INFERRED`)
+
+| 엣지 타입 | 신뢰도 | 의미 | 예시 |
+|---|---|---|---|
+| `calls` | INFERRED | 함수/메서드가 다른 함수를 호출 | `.authenticate()` → `.hash()` |
+| `uses` | INFERRED | 크로스파일 임포트 해석 | `DigestAuth` → `Response` |
+
+### 📌 문서/이미지/PDF용 엣지 타입 (LLM 시맨틱 분석)
+
+문서 처리는 LLM(Claude)이 자유 형식으로 엣지를 생성하므로, 아래는 **LLM이 판단하는 의미 관계들**이에요:
+
+| 엣지 타입 | 예시 |
+|---|---|
+| `references` | 논문A가 논문B를 인용 |
+| `explains` | 문서가 개념을 설명 |
+| `depends_on` | 모듈이 다른 모듈에 의존 |
+| `defines` | 파일이 개념을 정의 |
+| 기타 자유형식 | LLM이 문맥에서 판단 |
+
+### 📌 신뢰도 태그 (Confidence Labels) — T-Box의 핵심 특징!
+
+| 태그 | 의미 |
+|---|---|
+| `EXTRACTED` | 소스에서 **직접 확인된** 사실 (import 구문, class 선언 등) |
+| `INFERRED` | **합리적 추론** (call graph, 공동 출현) |
+| `AMBIGUOUS` | **불확실** — GRAPH_REPORT.md에서 검토 필요 |
+
+> 💡 이게 Graphify만의 T-Box 차별점이에요! OWL/RDF에는 없는 **신뢰도 메타데이터** 개념이에요.
+
+---
+
+## 3️⃣ T-Box 내부 구조 (실제 코드 기반)
+
+소스코드에서 확인한 **엣지 스키마**:
+
+```python
+# graphify/ARCHITECTURE.md에서 확인한 공식 스키마
+edge = {
+    "source": "node_id_a",           # 출발 노드 ID
+    "target": "node_id_b",           # 도착 노드 ID
+    "relation": "calls",             # 🔑 T-Box 타입 (엣지 종류)
+    "confidence": "EXTRACTED",       # 신뢰도 레이블
+    "source_file": "auth.py",        # 출처 파일
+    "source_location": "L42",        # 출처 라인
+    "weight": 1.0                    # 엣지 강도 (1.0=확실, 0.8=추론)
+}
+```
+
+### T-Box와 A-Box의 분리 방식
+
+```
+Graphify T-Box                    Graphify A-Box
+────────────────────              ───────────────────────────────────
+"relation" 값 집합                 graph.json의 실제 nodes + edges
+
+contains                           DigestAuth --contains--> .authenticate()
+imports                            auth.py --imports_from--> models
+imports_from                       httpx.py --imports--> ssl
+inherits                           BasicAuth --inherits--> AuthBase
+method                             Client --method--> .send()
+calls       (INFERRED)             .build_request() --calls--> .encode()
+uses        (INFERRED)             DigestAuth --uses--> Response
+```
+
+---
+
+## 4️⃣ T-Box 활용 방법
+
+### 방법 1: 기본 실행 — 자동으로 T-Box 적용됨
+
+```bash
+# 프로젝트에 Graphify 실행
+/graphify .                    # Claude Code에서
+graphify .                     # CLI에서
+
+# → graph.json 생성 (T-Box + A-Box 포함)
+# → graph.html 생성 (시각화)
+# → GRAPH_REPORT.md 생성 (분석 리포트)
+```
+
+### 방법 2: graph.json에서 T-Box 확인
+
+```python
+import json
+from pathlib import Path
+from collections import Counter
+
+# graph.json 로드
+g = json.loads(Path("graphify-out/graph.json").read_text())
+
+# T-Box 엣지 타입 조회 (= 현재 그래프의 T-Box 목록)
+edge_types = Counter(e["relation"] for e in g["links"])
+print("📊 T-Box 엣지 타입 분포:")
+for rel, count in edge_types.most_common():
+    print(f"  {rel:20s} : {count:4d}개")
+
+# 출력 예시:
+# calls                :  830개  (INFERRED)
+# contains             :  421개  (EXTRACTED)
+# imports_from         :  312개  (EXTRACTED)
+# method               :  180개  (EXTRACTED)
+# imports              :   72개  (EXTRACTED)
+# inherits             :   23개  (EXTRACTED)
+# uses                 :   15개  (INFERRED)
+```
+
+### 방법 3: 특정 T-Box 타입으로 A-Box 필터링
+
+```python
+# "inherits" 관계만 추출 (T-Box 기반 필터링)
+inheritance_edges = [
+    e for e in g["links"]
+    if e["relation"] == "inherits"
+]
+
+nodes = {n["id"]: n["label"] for n in g["nodes"]}
+print("\n🔗 상속 관계 (inherits):")
+for e in inheritance_edges:
+    src = nodes.get(e["source"], e["source"])
+    tgt = nodes.get(e["target"], e["target"])
+    print(f"  {src} ──inherits──▶ {tgt}")
+```
+
+### 방법 4: graphify CLI 쿼리로 T-Box 기반 탐색
+
+```bash
+# 특정 관계 타입으로 연결된 노드 탐색
+graphify query "어떤 클래스들이 상속 관계인가?"
+graphify query "imports 관계 보여줘"
+graphify path "DigestAuth" "Response"    # 두 노드 간 경로 탐색
+graphify explain "DigestAuth"            # 노드 상세 설명
+```
+
+### 방법 5: MCP 서버로 에이전트에서 활용
+
+```bash
+# MCP 서버 시작
+graphify . --mcp
+
+# Claude Code, Cursor 등에서 자동으로 그래프 조회 가능
+# 에이전트가 T-Box 기반으로 코드 구조 이해
+```
+
+---
+
+## 5️⃣ T-Box 업데이트는 가능한가? ⭐ 핵심!
+
+### ✅ 가능한 것 (공식 지원)
+
+#### A. `--update` 플래그로 증분 업데이트 (A-Box 업데이트)
+
+```bash
+# 변경된 파일만 재추출 → graph.json 머지
+graphify . --update
+
+# 이 방식은 A-Box(인스턴스)를 업데이트
+# T-Box(엣지 타입)는 변경 없음
+```
+
+```bash
+# --watch 모드로 파일 변경 시 자동 업데이트
+graphify . --watch
+# 코드 파일 저장 → 즉시 AST 재분석 (LLM 없이)
+# 문서 변경 → --update 필요 알림
+```
+
+#### B. `--mode deep`으로 더 많은 INFERRED 엣지 생성
+
+```bash
+# 기본 모드: 명시적 관계 위주
+graphify .
+
+# deep 모드: LLM이 더 공격적으로 INFERRED 엣지 생성
+graphify . --mode deep
+# → 더 많은 암묵적 T-Box 관계 추출
+```
+
+### ❌ 불가능한 것 (T-Box 직접 커스터마이즈)
+
+```
+현재 Graphify는 이것들이 불가능해요:
+  ❌ 사용자가 직접 새 엣지 타입 추가 (예: "satisfies", "implements_interface")
+  ❌ graphify.yaml/graphify.json 같은 설정 파일로 T-Box 변경
+  ❌ 엣지 타입의 domain/range 제약 정의
+  ❌ 클래스 계층(SubClassOf) 정의
+  ❌ 온톨로지 추론 엔진 연동
+```
+
+### 🔧 T-Box 확장하려면? → 소스 코드 수정
+
+```python
+# graphify/extract.py 수정 예시
+# "satisfies" 엣지 타입 추가 (인터페이스 구현 관계)
+
+def extract_python(path: Path) -> dict:
+    # ... 기존 코드 ...
+
+    # 인터페이스 구현 관계 추가
+    if t == "class_definition":
+        # 기존 inherits 처리 ...
+
+        # 새로운 T-Box 타입: "satisfies" (프로토콜 구현)
+        for interface_name in get_protocol_implementations(node):
+            add_edge(class_nid, interface_nid, "satisfies", line)
+            # ↑ 새 T-Box 엣지 타입 추가!
+```
+
+> ⚠️ **소스 수정 방법**: 아키텍처 문서에 언급된 대로, 새 언어/관계 추가 시 `extract.py`의 `add_edge()` 호출 부분에 새 `relation` 값을 추가하면 돼요.
+
+---
+
+## 6️⃣ 실전 활용 예제: graph.json 분석 코드
+
+```python
+import json
+from pathlib import Path
+
+def analyze_tbox_usage(graph_path: str = "graphify-out/graph.json"):
+    """T-Box 타입별 A-Box 분포 분석"""
+    g = json.loads(Path(graph_path).read_text())
+
+    nodes = {n["id"]: n for n in g["nodes"]}
+    links = g.get("links", [])
+
+    # 1. T-Box 통계
+    from collections import defaultdict, Counter
+    tbox_stats = Counter(e["relation"] for e in links)
+    confidence_stats = Counter(e.get("confidence", "?") for e in links)
+
+    print("=== T-Box 엣지 타입 분포 ===")
+    for rel, cnt in tbox_stats.most_common():
+        print(f"  {rel:20s}: {cnt:4d}개")
+
+    print("\n=== 신뢰도 분포 ===")
+    for conf, cnt in confidence_stats.items():
+        print(f"  {conf:12s}: {cnt:4d}개")
+
+    # 2. 특정 T-Box 타입으로 그래프 탐색
+    print("\n=== 상속 계층 (inherits) ===")
+    for e in links:
+        if e["relation"] == "inherits":
+            src_label = nodes.get(e["source"], {}).get("label", e["source"])
+            tgt_label = nodes.get(e["target"], {}).get("label", e["target"])
+            print(f"  {src_label} ──▶ {tgt_label}")
+
+    # 3. 가장 많이 호출되는 함수 (calls 타입)
+    print("\n=== 핵심 함수 TOP 5 (많이 호출됨) ===")
+    call_counts = Counter(
+        e["target"] for e in links if e["relation"] == "calls"
+    )
+    for nid, cnt in call_counts.most_common(5):
+        label = nodes.get(nid, {}).get("label", nid)
+        print(f"  {label:30s}: {cnt}번 호출됨")
+
+    # 4. AMBIGUOUS 엣지 검토 (불확실한 T-Box 관계)
+    ambiguous = [e for e in links if e.get("confidence") == "AMBIGUOUS"]
+    if ambiguous:
+        print(f"\n=== ⚠️ AMBIGUOUS 엣지 ({len(ambiguous)}개) ===")
+        for e in ambiguous[:5]:
+            src = nodes.get(e["source"], {}).get("label", e["source"])
+            tgt = nodes.get(e["target"], {}).get("label", e["target"])
+            print(f"  {src} --{e['relation']}--> {tgt}")
+
+analyze_tbox_usage()
+```
+
+---
+
+## 7️⃣ Graphify T-Box vs 다른 도구 비교
+
+| 구분 | **Graphify** | **Graphiti** | **OWL/RDF** |
+|---|---|---|---|
+| **T-Box 위치** | `extract.py` 코드 내 하드코딩 | Pydantic 모델 파일 | `.ttl` / `.owl` 파일 |
+| **T-Box 커스터마이즈** | ❌ 소스 수정 필요 | ✅ Pydantic 모델 정의 | ✅ 완전 자유 |
+| **신뢰도 태깅** | ✅ EXTRACTED/INFERRED/AMBIGUOUS | ❌ (temporal validity로 대체) | ❌ |
+| **도메인 추론** | ❌ | ❌ | ✅ HermiT/Pellet |
+| **업데이트 방식** | `--update` (A-Box만) | `add_episode()` 실시간 | 트리플스토어 직접 수정 |
+| **T-Box 안정성** | 버전 업에서만 변경 | 언제든 변경 가능 | 언제든 변경 가능 |
+| **주요 목적** | 코드/문서 구조 이해 | AI 에이전트 메모리 | 시맨틱 웹 표준 |
+
+---
+
+## 📝 핵심 요약
+
+| 질문 | 답변 |
+|---|---|
+| **T-Box가 어디에 정의?** | `graphify/extract.py` 소스 코드 내 하드코딩 |
+| **T-Box 타입은 무엇?** | `calls`, `contains`, `imports`, `imports_from`, `inherits`, `method`, `uses` |
+| **고유 특징은?** | `EXTRACTED/INFERRED/AMBIGUOUS` 신뢰도 태그 |
+| **T-Box 업데이트 가능?** | A-Box(`--update`)는 가능, **T-Box 타입 자체는 소스 수정 필요** |
+| **커스텀 T-Box 필요하면?** | **Graphiti** (Pydantic 모델) 사용 권장 |
+
+> 💡 **결론**: Graphify의 T-Box는 **코드/문서 분석 전용으로 최적화된 고정 스키마**예요. 커스텀 도메인 온톨로지가 필요하다면 Graphiti를 함께 사용하는 조합이 가장 실용적이에요! 🎯
 
 
