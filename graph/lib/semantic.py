@@ -43,6 +43,22 @@ def _rel_path(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _is_corpus_md(path: Path, corpus_dir: Path) -> bool:
+    """True for staged corpus markdown; excludes PDF foundation work dirs.
+
+    Wiki Sync keeps progressive ``extracted.md`` under
+    ``converted/.pdf_pages/{stem}_{hash}/``; those are intermediates and must
+    not be fed to semantic extraction (final text lives in ``*_partNN.md``).
+    """
+    if not path.is_file() or path.name == ".gitkeep":
+        return False
+    try:
+        rel = path.resolve().relative_to(corpus_dir.resolve())
+    except ValueError:
+        return False
+    return ".pdf_pages" not in rel.parts
+
+
 def _read_doc(path: Path, *, max_chars: int = 12000) -> str:
     text = path.read_text(encoding="utf-8", errors="replace")
     if len(text) > max_chars:
@@ -372,7 +388,7 @@ def extract_from_queue(
         valid_sources = {
             str(p.resolve())
             for p in corpus_dir.rglob("*.md")
-            if p.is_file() and p.name != ".gitkeep"
+            if _is_corpus_md(p, corpus_dir)
         }
 
         def _src_ok(src: Any) -> bool:
@@ -434,8 +450,9 @@ def extract_corpus(
     _orig_cache_dir = _install_flat_cache_dir(gc)
 
     try:
-        files = sorted(corpus_dir.rglob("*.md"))
-        files = [p for p in files if p.is_file() and p.name != ".gitkeep"]
+        files = sorted(
+            p for p in corpus_dir.rglob("*.md") if _is_corpus_md(p, corpus_dir)
+        )
         if limit is not None:
             files = files[:limit]
         if not files:

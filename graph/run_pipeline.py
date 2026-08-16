@@ -31,11 +31,19 @@ def _run(cmd: list[str], *, env: dict[str, str] | None = None) -> None:
 def _corpus_md_count(corpus: Path) -> int:
     if not corpus.is_dir():
         return 0
-    return sum(
-        1
-        for p in corpus.rglob("*.md")
-        if p.is_file() and p.name != ".gitkeep"
-    )
+    # Match semantic.extract_corpus: skip converted/.pdf_pages intermediates.
+    root = corpus.resolve()
+    count = 0
+    for p in corpus.rglob("*.md"):
+        if not p.is_file() or p.name == ".gitkeep":
+            continue
+        try:
+            if ".pdf_pages" in p.resolve().relative_to(root).parts:
+                continue
+        except ValueError:
+            continue
+        count += 1
+    return count
 
 
 def main() -> None:
