@@ -296,6 +296,15 @@ export default function App() {
       setTasks((prev) => [task, ...prev]);
       setActiveTaskId(task.id);
       setMessages([]);
+      setConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              default_skills: task.skills,
+              default_mcp_servers: task.mcp_servers,
+            }
+          : prev,
+      );
     } catch (err) {
       uiError("task:create failed", err);
       setBootError(TASK_ERROR_MESSAGE);
@@ -320,6 +329,22 @@ export default function App() {
       setTasks((prev) =>
         sortTasks(prev.map((t) => (t.id === updated.id ? updated : t))),
       );
+      // Keep config defaults in sync with settings.json (server persists on patch).
+      if (patch.skills !== undefined || patch.mcp_servers !== undefined) {
+        setConfig((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...(patch.skills !== undefined
+                  ? { default_skills: updated.skills }
+                  : {}),
+                ...(patch.mcp_servers !== undefined
+                  ? { default_mcp_servers: updated.mcp_servers }
+                  : {}),
+              }
+            : prev,
+        );
+      }
     } catch (err) {
       uiError("task:patch failed", err);
       const message =
@@ -429,6 +454,15 @@ export default function App() {
       setTasks([task]);
       setActiveTaskId(task.id);
       setMessages([]);
+      setConfig((prev) =>
+        prev
+          ? {
+              ...prev,
+              default_skills: task.skills,
+              default_mcp_servers: task.mcp_servers,
+            }
+          : prev,
+      );
     } catch (err) {
       uiError("task:delete failed", err);
       setBootError(TASK_ERROR_MESSAGE);

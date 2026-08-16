@@ -18,10 +18,12 @@ export function buildNewTaskDefaults(
   config: AppConfig,
   activeTask: Task | null,
 ): CreateTaskDefaults {
+  // Skill/MCP defaults come from per-user settings.json via /api/config
+  // (default_skills / default_mcp_servers), not from the active task.
   return {
     model_name: activeTask?.model_name ?? config.default_model,
-    skills: activeTask?.skills ?? config.default_skills,
-    mcp_servers: activeTask?.mcp_servers ?? config.default_mcp_servers,
+    skills: config.default_skills ?? [],
+    mcp_servers: config.default_mcp_servers ?? [],
     guardrail_enabled: activeTask?.guardrail_enabled ?? false,
     memory_enabled: activeTask?.memory_enabled ?? true,
     llm_gateway_enabled: activeTask?.llm_gateway_enabled ?? false,
