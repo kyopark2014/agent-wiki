@@ -86,10 +86,10 @@ T-Box 설계의 **첫 번째 단계**는 온톨로지가 답해야 할 질문 �
 > "이 온톨로지로 어떤 질문에 답할 수 있어야 하는가?"
 > → CQ를 먼저 쓰면 **과도한 설계(over-engineering)** 를 방지해요!
 
-#### 예시: 경수님의 "챗봇 사용자 관심사 추적 온톨로지"
+#### 예시: "챗봇 사용자 관심사 추적 온톨로지"
 
 ```
-CQ1. "박경수 사용자가 최근 1달간 관심을 보인 주제는 무엇인가?"
+CQ1. "홍길동 사용자가 최근 1달간 관심을 보인 주제는 무엇인가?"
 CQ2. "AWS 관련 주제에 관심 있는 사용자는 누구인가?"
 CQ3. "사용자의 관심이 어떻게 변화했는가? (시간 추적)"
 CQ4. "특정 주제에 대해 사용자가 몇 번이나 질문했는가?"
@@ -218,7 +218,7 @@ chat:Preference rdfs:subClassOf [
 ] .
 ```
 
-#### 방법 B: Graphiti Pydantic 모델 (경수님 프로젝트에 바로 적용 가능!)
+#### 방법 B: Graphiti Pydantic 모델 
 
 ```python
 from pydantic import BaseModel, Field
@@ -407,14 +407,14 @@ T-Box 통합 테스트 구조
 ─────────────────────────────────────────────────
 T-Box (검증 대상)        A-Box (테스트 데이터)
 ─────────────────  +  ──────────────────────────
-클래스 정의           박경수 : User
+클래스 정의           홍길동 : User
 속성 정의             AWS주제 : AwsTopic
-계층 관계             박경수 -hasInterest→ AWS관심사
+계층 관계             홍길동 -hasInterest→ AWS관심사
 제약 조건             AWS관심사 -strength→ 0.85
                                 ↓
                     추론 엔진 실행
                                 ↓
-               검증: "박경수 : User", "AWS주제 : Topic" 등
+               검증: "홍길동 : User", "AWS주제 : Topic" 등
 ```
 
 #### 통합 테스트 코드
@@ -443,7 +443,7 @@ class TBoxIntegrationTest(unittest.TestCase):
         g = self.g
         # 사용자 인스턴스
         g.add((INST.kyopark, RDF.type, CHAT.User))
-        g.add((INST.kyopark, CHAT.userName, Literal("박경수")))
+        g.add((INST.kyopark, CHAT.userName, Literal("홍길동")))
         
         # AWS 주제 인스턴스 (AwsTopic은 TechTopic ⊑ Topic)
         g.add((INST.awsNeptune, RDF.type, CHAT.AwsTopic))
@@ -458,9 +458,9 @@ class TBoxIntegrationTest(unittest.TestCase):
     
     # ─── 테스트 케이스 1: 클래스 타입 확인 ───
     def test_user_is_correct_type(self):
-        """박경수는 User 타입이어야 함"""
+        """홍길동는 User 타입이어야 함"""
         result = (INST.kyopark, RDF.type, CHAT.User) in self.g
-        self.assertTrue(result, "박경수가 User 타입이 아님!")
+        self.assertTrue(result, "홍길동가 User 타입이 아님!")
     
     # ─── 테스트 케이스 2: 계층 관계 확인 ───
     def test_awstopic_subclass_of_topic(self):
@@ -476,7 +476,7 @@ class TBoxIntegrationTest(unittest.TestCase):
     
     # ─── 테스트 케이스 4: SPARQL 쿼리로 CQ 검증 ───
     def test_cq1_user_interests(self):
-        """CQ1: 박경수의 관심사 주제를 조회할 수 있어야 함"""
+        """CQ1: 홍길동의 관심사 주제를 조회할 수 있어야 함"""
         query = """
         PREFIX chat: <http://chatbot-ontology.com/ontology#>
         PREFIX inst: <http://chatbot-ontology.com/instance#>
@@ -594,12 +594,8 @@ T-Box 설계 및 시험 7단계 요약
 7️⃣ 반복 개선      → 실패한 테스트 기반 수정
 ```
 
-> 💡 **경수님 프로젝트 적용 팁**: Graphiti를 사용하신다면 **Pydantic 모델이 T-Box**예요! Python `unittest`로 엔티티 타입 정의와 관계를 검증하면 충분히 실용적인 T-Box 시험이 가능합니다. 🎯
+> 💡 **프로젝트 적용 팁**: Graphiti를 사용하신다면 **Pydantic 모델이 T-Box**예요! Python `unittest`로 엔티티 타입 정의와 관계를 검증하면 충분히 실용적인 T-Box 시험이 가능합니다. 🎯
 
-더 궁금하신 부분이 있으면 말씀해 주세요 😊
-- Protégé 실습 단계별 가이드
-- 경수님 Graphiti 프로젝트에 맞춘 T-Box 설계 예시 코드
-- SPARQL로 CQ 검증하는 실전 예제
 
 
 
