@@ -121,6 +121,64 @@ Agent는 도구(MCP)·Skill 지시문을 받아 ReAct 루프로 동작합니다.
 
 
 
+## Graphify T-Box의 실제 엣지 타입 전체 목록
+
+> **Graphify의 T-Box는 `extract.py` 소스 코드 안에 하드코딩된 엣지 타입(relation 값) 집합입니다.**
+> OWL/RDF처럼 별도 온톨로지 파일이 없고, 별도 config로 사용자 정의도 안 돼요!
+
+```
+Graphify T-Box 위치:
+  graphify/extract.py 내부의 add_edge() 호출부
+      ↓
+  "relation": "calls" | "imports" | "contains" | "inherits" | ...
+```
+
+
+### 코드 분석용 엣지 타입 (AST 기반 — `EXTRACTED`)
+
+| 엣지 타입 | 신뢰도 | 의미 | 예시 |
+|---|---|---|---|
+| `contains` | EXTRACTED | 파일이 클래스/함수를 포함 | `auth.py` → `DigestAuth` |
+| `imports` | EXTRACTED | 파일이 모듈을 임포트 | `main.py` → `requests` |
+| `imports_from` | EXTRACTED | 파일이 특정 모듈에서 임포트 | `auth.py` → `models` |
+| `inherits` | EXTRACTED | 클래스가 부모 클래스를 상속 | `DigestAuth` → `Auth` |
+| `method` | EXTRACTED | 클래스가 메서드를 보유 | `DigestAuth` → `.authenticate()` |
+
+### 코드 분석용 엣지 타입 (Call Graph — `INFERRED`)
+
+| 엣지 타입 | 신뢰도 | 의미 | 예시 |
+|---|---|---|---|
+| `calls` | INFERRED | 함수/메서드가 다른 함수를 호출 | `.authenticate()` → `.hash()` |
+| `uses` | INFERRED | 크로스파일 임포트 해석 | `DigestAuth` → `Response` |
+
+### 문서/이미지/PDF용 엣지 타입 (LLM 시맨틱 분석)
+
+문서 처리는 LLM(Claude)이 자유 형식으로 엣지를 생성하므로, 아래는 **LLM이 판단하는 의미 관계들**이에요:
+
+| 엣지 타입 | 예시 |
+|---|---|
+| `references` | 논문A가 논문B를 인용 |
+| `explains` | 문서가 개념을 설명 |
+| `depends_on` | 모듈이 다른 모듈에 의존 |
+| `defines` | 파일이 개념을 정의 |
+| 기타 자유형식 | LLM이 문맥에서 판단 |
+
+### 신뢰도 태그 (Confidence Labels) — T-Box의 핵심 특징!
+
+| 태그 | 의미 |
+|---|---|
+| `EXTRACTED` | 소스에서 **직접 확인된** 사실 (import 구문, class 선언 등) |
+| `INFERRED` | **합리적 추론** (call graph, 공동 출현) |
+| `AMBIGUOUS` | **불확실** — GRAPH_REPORT.md에서 검토 필요 |
+
+> 💡 이게 Graphify만의 T-Box 차별점이에요! OWL/RDF에는 없는 **신뢰도 메타데이터** 개념이에요.
+
+
+
+
+
+
+
 ### Knowledge Graph · Wiki Graph 개요
 
 agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
@@ -216,7 +274,55 @@ tasks.db
 | AMBIGUOUS | 불확실 (0.1–0.3) |
 
 
+### T-Box와 A-Box의 분리 방식
 
+```
+Graphify T-Box                    Graphify A-Box
+────────────────────              ───────────────────────────────────
+"relation" 값 집합                 graph.json의 실제 nodes + edges
+
+contains                           DigestAuth --contains--> .authenticate()
+imports                            auth.py --imports_from--> models
+imports_from                       httpx.py --imports--> ssl
+inherits                           BasicAuth --inherits--> AuthBase
+method                             Client --method--> .send()
+calls       (INFERRED)             .build_request() --calls--> .encode()
+uses        (INFERRED)             DigestAuth --uses--> Response
+```
+
+### Graphify T-Box vs 다른 도구 비교
+
+| 구분 | **Graphify** | **Graphiti** | **OWL/RDF** |
+|---|---|---|---|
+| **T-Box 위치** | `extract.py` 코드 내 하드코딩 | Pydantic 모델 파일 | `.ttl` / `.owl` 파일 |
+| **T-Box 커스터마이즈** | ❌ 소스 수정 필요 | ✅ Pydantic 모델 정의 | ✅ 완전 자유 |
+| **신뢰도 태깅** | ✅ EXTRACTED/INFERRED/AMBIGUOUS | ❌ (temporal validity로 대체) | ❌ |
+| **도메인 추론** | ❌ | ❌ | ✅ HermiT/Pellet |
+| **업데이트 방식** | `--update` (A-Box만) | `add_episode()` 실시간 | 트리플스토어 직접 수정 |
+| **T-Box 안정성** | 버전 업에서만 변경 | 언제든 변경 가능 | 언제든 변경 가능 |
+| **주요 목적** | 코드/문서 구조 이해 | AI 에이전트 메모리 | 시맨틱 웹 표준 |
+
+
+### graph.json
+
+아래와 같이 graph.json을 생성고 활용합니다.
+
+① 넣는 방법: graphify . 실행 → 파일 자동 분석 → graph.json 생성
+② 업데이트:  graphify . --update → 변경된 파일만 SHA256 체크 후 증분 머지
+③ 활용:      graphify query / path / explain 또는 graph.json 직접 Python 분석
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   graph.json                        │
+│                                                     │
+│  T-Box: "relation" 값 종류                            │
+│         (calls, contains, inherits ...)             │
+│                                                     │
+│  A-Box: 실제 인스턴스 데이터                             │
+│         nodes: [{id, label, file_type, ...}]        │
+│         links: [{source, target, relation, ...}]    │
+└─────────────────────────────────────────────────────┘
+```
 
 
 ## Wiki Graph
