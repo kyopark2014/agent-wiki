@@ -56,6 +56,560 @@ inst:AirEmission_AM001_2025-09-01_070000
 
 ---
 
+
+## 🏗️ T-Box 설계 및 시험 방법
+
+---
+
+### 1️⃣ T-Box 설계 전체 프로세스 개요
+
+```
+T-Box 설계 → 구현 → 시험 전체 흐름
+──────────────────────────────────────────────────
+① 요구사항 분석    → 도메인 이해, CQ 작성
+② 개념 모델링      → 클래스·관계·속성 정의
+③ OWL 구현        → Protégé 또는 코드로 작성
+④ 일관성 검사      → HermiT/Pellet 추론기 실행
+⑤ 추론 검증       → 예상 추론 결과 확인
+⑥ 인스턴스 테스트 → A-Box 붙여서 통합 검증
+⑦ 반복 개선       → 피드백 반영 후 수정
+```
+
+---
+
+### 2️⃣ STEP 1: 요구사항 분석 — Competency Question(CQ)
+
+T-Box 설계의 **첫 번째 단계**는 온톨로지가 답해야 할 질문 목록을 먼저 정의하는 거예요.
+
+#### Competency Question(CQ)이란?
+
+> "이 온톨로지로 어떤 질문에 답할 수 있어야 하는가?"
+> → CQ를 먼저 쓰면 **과도한 설계(over-engineering)** 를 방지해요!
+
+#### 예시: 경수님의 "챗봇 사용자 관심사 추적 온톨로지"
+
+```
+CQ1. "박경수 사용자가 최근 1달간 관심을 보인 주제는 무엇인가?"
+CQ2. "AWS 관련 주제에 관심 있는 사용자는 누구인가?"
+CQ3. "사용자의 관심이 어떻게 변화했는가? (시간 추적)"
+CQ4. "특정 주제에 대해 사용자가 몇 번이나 질문했는가?"
+CQ5. "어떤 주제들이 함께 자주 등장하는가?"
+```
+
+---
+
+### 3️⃣ STEP 2: 개념 모델 설계
+
+#### T-Box 4대 구성요소 설계
+
+| 구성요소 | 설명 | 예시 |
+|---|---|---|
+| **클래스(Class)** | 개념/범주 정의 | `User`, `Topic`, `Preference`, `Interaction` |
+| **계층관계(SubClassOf)** | 상속 관계 | `TechTopic ⊑ Topic`, `AWStopic ⊑ TechTopic` |
+| **속성(Property)** | 관계 및 데이터 | `hasInterest`, `mentionedIn`, `occurredAt` |
+| **제약조건(Restriction)** | 도메인/범위/개수 | `hasInterest` 범위: `Topic` |
+
+#### 설계 다이어그램
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                챗봇 관심사 T-Box 설계                     │
+│                                                          │
+│  User ──hasInterest──▶ Preference                        │
+│   │                        │                            │
+│   └──participated──▶ Interaction ──aboutTopic──▶ Topic  │
+│                            │              │              │
+│                     occurredAt      ┌─────▼──────┐       │
+│                      (DateTime)     │  TechTopic │       │
+│                                     │  AwsTopic  │       │
+│                                     │  AITopic   │       │
+│                                     └────────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 4️⃣ STEP 3: OWL/Turtle 코드로 구현
+
+#### 방법 A: OWL/Turtle 파일 직접 작성
+
+```turtle
+# chatbot_ontology.ttl
+
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix chat: <http://chatbot-ontology.com/ontology#> .
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 1. 클래스 정의 (T-Box: 개념 정의)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+chat:User a owl:Class ;
+    rdfs:label "사용자"@ko ;
+    rdfs:comment "챗봇 서비스를 이용하는 사람" .
+
+chat:Topic a owl:Class ;
+    rdfs:label "주제"@ko ;
+    rdfs:comment "대화에서 언급된 관심 주제" .
+
+# 계층 관계 (SubClassOf)
+chat:TechTopic a owl:Class ;
+    rdfs:subClassOf chat:Topic ;
+    rdfs:label "기술 주제"@ko .
+
+chat:AwsTopic a owl:Class ;
+    rdfs:subClassOf chat:TechTopic ;
+    rdfs:label "AWS 관련 주제"@ko .
+
+chat:Preference a owl:Class ;
+    rdfs:label "선호도"@ko ;
+    rdfs:comment "사용자의 관심사 선호 강도" .
+
+chat:Interaction a owl:Class ;
+    rdfs:label "대화 인터랙션"@ko .
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 2. Object Property 정의 (관계)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+chat:hasInterest a owl:ObjectProperty ;
+    rdfs:domain chat:User ;
+    rdfs:range chat:Preference ;
+    rdfs:label "관심사를 가짐"@ko .
+
+chat:aboutTopic a owl:ObjectProperty ;
+    rdfs:domain chat:Interaction ;
+    rdfs:range chat:Topic ;
+    rdfs:label "주제에 관한"@ko .
+
+chat:participated a owl:ObjectProperty ;
+    rdfs:domain chat:User ;
+    rdfs:range chat:Interaction ;
+    rdfs:label "참여함"@ko .
+
+# Inverse 관계
+chat:isTopicOf a owl:ObjectProperty ;
+    owl:inverseOf chat:aboutTopic .
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 3. Datatype Property 정의 (속성값)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+chat:userName a owl:DatatypeProperty ;
+    rdfs:domain chat:User ;
+    rdfs:range xsd:string .
+
+chat:strength a owl:DatatypeProperty ;
+    rdfs:domain chat:Preference ;
+    rdfs:range xsd:float ;
+    rdfs:comment "관심 강도 (0.0 ~ 1.0)" .
+
+chat:occurredAt a owl:DatatypeProperty ;
+    rdfs:domain chat:Interaction ;
+    rdfs:range xsd:dateTime .
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 4. 제약 조건 (Restriction)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 모든 Preference는 반드시 하나의 Topic을 가져야 함
+chat:Preference rdfs:subClassOf [
+    a owl:Restriction ;
+    owl:onProperty chat:aboutTopic ;
+    owl:minCardinality 1
+] .
+```
+
+#### 방법 B: Graphiti Pydantic 모델 (경수님 프로젝트에 바로 적용 가능!)
+
+```python
+from pydantic import BaseModel, Field
+from graphiti_core.nodes import EntityNode
+from typing import Optional
+
+# T-Box를 Pydantic 모델로 정의
+class User(EntityNode):
+    """챗봇 서비스를 이용하는 사용자"""
+    user_id: str = Field(description="사용자 고유 ID")
+    name: Optional[str] = Field(default=None, description="사용자 이름")
+
+class Topic(EntityNode):
+    """대화에서 언급된 관심 주제"""
+    category: str = Field(description="주제 카테고리 (tech/lifestyle/finance 등)")
+    keywords: list[str] = Field(default=[], description="관련 키워드 목록")
+
+class TechTopic(Topic):  # SubClassOf 관계!
+    """기술 관련 주제"""
+    tech_domain: Optional[str] = Field(default=None, description="기술 도메인 (AWS/AI/DB 등)")
+
+class Preference(EntityNode):
+    """사용자의 관심사 선호도"""
+    strength: float = Field(description="관심 강도 0.0~1.0")
+    trend: str = Field(description="변화 트렌드 (증가/감소/유지)")
+
+# T-Box를 Graphiti에 등록
+from graphiti_core.llm_client.config import LLMConfig
+
+entity_types = {
+    "User": User,
+    "Topic": Topic,
+    "TechTopic": TechTopic,
+    "Preference": Preference,
+}
+```
+
+---
+
+### 5️⃣ STEP 4: 일관성 검사 (Consistency Check)
+
+#### 🔧 도구 1: Protégé + HermiT/Pellet 추론기
+
+```
+Protégé 일관성 검사 방법
+────────────────────────────────────
+① Protégé 실행 → OWL 파일 열기
+② Reasoner 메뉴 → HermiT 선택
+③ "Start reasoner" 클릭
+④ 결과 확인:
+   ✅ "Ontology is consistent" → 문제 없음
+   ❌ "Ontology is inconsistent" → 오류 위치 확인
+```
+
+#### 🔧 도구 2: Python rdflib으로 자동 검사
+
+```python
+from rdflib import Graph, OWL, RDF, RDFS
+from rdflib.plugins.sparql import prepareQuery
+
+def check_tbox_consistency(ttl_file: str) -> dict:
+    """T-Box 기본 일관성 검사"""
+    g = Graph()
+    g.parse(ttl_file, format="turtle")
+    
+    results = {
+        "classes": [],
+        "object_properties": [],
+        "datatype_properties": [],
+        "subclass_relations": [],
+        "issues": []
+    }
+    
+    # 1. 클래스 목록 조회
+    classes_query = """
+    SELECT ?class ?label WHERE {
+        ?class a owl:Class .
+        OPTIONAL { ?class rdfs:label ?label . FILTER(lang(?label) = "ko") }
+    }
+    """
+    for row in g.query(classes_query):
+        results["classes"].append({
+            "uri": str(row.class_),
+            "label": str(row.label) if row.label else ""
+        })
+    
+    # 2. SubClassOf 관계 순환 검사
+    subclass_query = """
+    SELECT ?child ?parent WHERE {
+        ?child rdfs:subClassOf ?parent .
+        FILTER(?child != ?parent)
+    }
+    """
+    subclass_pairs = []
+    for row in g.query(subclass_query):
+        subclass_pairs.append((str(row.child), str(row.parent)))
+    results["subclass_relations"] = subclass_pairs
+    
+    # 3. Property Domain/Range 정의 여부 검사
+    property_query = """
+    SELECT ?prop WHERE {
+        ?prop a owl:ObjectProperty .
+        FILTER NOT EXISTS { ?prop rdfs:domain ?d }
+    }
+    """
+    for row in g.query(property_query):
+        results["issues"].append(f"⚠️ Domain 미정의 property: {row.prop}")
+    
+    return results
+
+# 실행 예시
+result = check_tbox_consistency("chatbot_ontology.ttl")
+print(f"클래스 수: {len(result['classes'])}")
+print(f"관계 수: {len(result['subclass_relations'])}")
+print(f"이슈: {result['issues']}")
+```
+
+---
+
+### 6️⃣ STEP 5: 추론 검증 (Reasoning Test)
+
+T-Box에서 정의한 규칙이 **올바르게 추론**되는지 검증해요.
+
+#### 추론 테스트 패턴: 예상 결과 검증
+
+```python
+from rdflib import Graph, Namespace, RDF, RDFS, OWL
+from rdflib.term import URIRef
+
+CHAT = Namespace("http://chatbot-ontology.com/ontology#")
+
+def test_subclass_inference(g: Graph) -> list[dict]:
+    """
+    T-Box 추론 테스트:
+    TechTopic ⊑ Topic 일 때,
+    AwsTopic ⊑ TechTopic 이면 → AwsTopic ⊑ Topic 이어야 함 (이행적 추론)
+    """
+    tests = []
+    
+    # 테스트 1: AwsTopic은 TechTopic의 서브클래스인가?
+    test1 = {
+        "name": "AwsTopic subClassOf TechTopic",
+        "expected": True,
+        "result": (CHAT.AwsTopic, RDFS.subClassOf, CHAT.TechTopic) in g
+    }
+    test1["pass"] = test1["result"] == test1["expected"]
+    tests.append(test1)
+    
+    # 테스트 2: Preference는 반드시 Topic을 가져야 하는가?
+    restriction_query = """
+    SELECT ?cls WHERE {
+        ?cls rdfs:subClassOf [
+            a owl:Restriction ;
+            owl:onProperty chat:aboutTopic
+        ]
+    }
+    """
+    # ... 추가 테스트
+    
+    return tests
+
+# 모든 테스트 실행
+def run_all_tbox_tests(ttl_file: str):
+    g = Graph()
+    g.parse(ttl_file, format="turtle")
+    
+    test_results = test_subclass_inference(g)
+    
+    passed = sum(1 for t in test_results if t["pass"])
+    total = len(test_results)
+    
+    print(f"\n📊 T-Box 추론 테스트 결과: {passed}/{total} 통과")
+    for test in test_results:
+        status = "✅" if test["pass"] else "❌"
+        print(f"  {status} {test['name']}")
+```
+
+---
+
+### 7️⃣ STEP 6: A-Box를 이용한 통합 시험
+
+T-Box만 단독 테스트가 어렵기 때문에, **실제 인스턴스(A-Box)를 붙여서** 통합 검증해요.
+
+```
+T-Box 통합 테스트 구조
+─────────────────────────────────────────────────
+T-Box (검증 대상)        A-Box (테스트 데이터)
+─────────────────  +  ──────────────────────────
+클래스 정의           박경수 : User
+속성 정의             AWS주제 : AwsTopic
+계층 관계             박경수 -hasInterest→ AWS관심사
+제약 조건             AWS관심사 -strength→ 0.85
+                                ↓
+                    추론 엔진 실행
+                                ↓
+               검증: "박경수 : User", "AWS주제 : Topic" 등
+```
+
+#### 통합 테스트 코드
+
+```python
+import unittest
+from rdflib import Graph, Namespace, RDF, RDFS
+from rdflib.term import URIRef, Literal
+
+CHAT = Namespace("http://chatbot-ontology.com/ontology#")
+INST = Namespace("http://chatbot-ontology.com/instance#")
+XSD  = Namespace("http://www.w3.org/2001/XMLSchema#")
+
+class TBoxIntegrationTest(unittest.TestCase):
+    
+    def setUp(self):
+        """T-Box + 테스트용 A-Box 로드"""
+        self.g = Graph()
+        # T-Box 로드
+        self.g.parse("chatbot_ontology.ttl", format="turtle")
+        # 테스트용 A-Box 인스턴스 추가
+        self._add_test_instances()
+    
+    def _add_test_instances(self):
+        """테스트용 인스턴스 삽입"""
+        g = self.g
+        # 사용자 인스턴스
+        g.add((INST.kyopark, RDF.type, CHAT.User))
+        g.add((INST.kyopark, CHAT.userName, Literal("박경수")))
+        
+        # AWS 주제 인스턴스 (AwsTopic은 TechTopic ⊑ Topic)
+        g.add((INST.awsNeptune, RDF.type, CHAT.AwsTopic))
+        
+        # 선호도 인스턴스
+        g.add((INST.pref001, RDF.type, CHAT.Preference))
+        g.add((INST.pref001, CHAT.strength, Literal(0.85)))
+        g.add((INST.pref001, CHAT.aboutTopic, INST.awsNeptune))
+        
+        # 사용자-선호도 연결
+        g.add((INST.kyopark, CHAT.hasInterest, INST.pref001))
+    
+    # ─── 테스트 케이스 1: 클래스 타입 확인 ───
+    def test_user_is_correct_type(self):
+        """박경수는 User 타입이어야 함"""
+        result = (INST.kyopark, RDF.type, CHAT.User) in self.g
+        self.assertTrue(result, "박경수가 User 타입이 아님!")
+    
+    # ─── 테스트 케이스 2: 계층 관계 확인 ───
+    def test_awstopic_subclass_of_topic(self):
+        """AwsTopic은 TechTopic의 하위 클래스"""
+        result = (CHAT.AwsTopic, RDFS.subClassOf, CHAT.TechTopic) in self.g
+        self.assertTrue(result, "AwsTopic이 TechTopic의 서브클래스가 아님!")
+    
+    # ─── 테스트 케이스 3: 속성 domain/range 검증 ───
+    def test_hasinterest_domain_is_user(self):
+        """hasInterest의 도메인은 User여야 함"""
+        result = (CHAT.hasInterest, RDFS.domain, CHAT.User) in self.g
+        self.assertTrue(result, "hasInterest의 domain이 User가 아님!")
+    
+    # ─── 테스트 케이스 4: SPARQL 쿼리로 CQ 검증 ───
+    def test_cq1_user_interests(self):
+        """CQ1: 박경수의 관심사 주제를 조회할 수 있어야 함"""
+        query = """
+        PREFIX chat: <http://chatbot-ontology.com/ontology#>
+        PREFIX inst: <http://chatbot-ontology.com/instance#>
+        
+        SELECT ?topic WHERE {
+            inst:kyopark chat:hasInterest ?pref .
+            ?pref chat:aboutTopic ?topic .
+        }
+        """
+        results = list(self.g.query(query))
+        self.assertGreater(len(results), 0, "관심사 주제 조회 결과가 없음!")
+    
+    # ─── 테스트 케이스 5: 잘못된 인스턴스 거부 ───
+    def test_invalid_strength_value(self):
+        """strength는 숫자여야 하며 0~1 사이여야 함"""
+        # 잘못된 값 추가
+        self.g.add((INST.pref001, CHAT.strength, Literal("강함")))  # 문자열은 잘못됨
+        query = """
+        PREFIX chat: <http://chatbot-ontology.com/ontology#>
+        PREFIX inst: <http://chatbot-ontology.com/instance#>
+        
+        SELECT ?s WHERE {
+            inst:pref001 chat:strength ?s .
+            FILTER(isNumeric(?s))
+        }
+        """
+        results = list(self.g.query(query))
+        self.assertEqual(len(results), 1, "숫자 strength 값이 1개여야 함")
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+```
+
+---
+
+### 8️⃣ STEP 7: SWRL 규칙 검증 (고급)
+
+T-Box에 **추론 규칙(SWRL)**을 추가하고 검증하는 방법이에요.
+
+```
+SWRL 규칙 예시:
+"사용자가 여러 번 AWS 주제에 대해 인터랙션했다면,
+ 그 사용자는 'AWS 전문 관심 사용자'로 분류"
+
+User(?u) ∧ participated(?u, ?i) ∧ aboutTopic(?i, ?t)
+∧ AwsTopic(?t) → hasExpertInterest(?u, ?t)
+```
+
+```python
+# Python으로 SWRL 규칙 검증
+def test_swrl_rule_aws_expert(g: Graph):
+    """
+    SWRL 규칙: AWS 주제로 3회 이상 인터랙션 → AWS 전문 관심 사용자
+    """
+    query = """
+    PREFIX chat: <http://chatbot-ontology.com/ontology#>
+    
+    SELECT ?user (COUNT(?interaction) AS ?count)
+    WHERE {
+        ?user a chat:User .
+        ?user chat:participated ?interaction .
+        ?interaction chat:aboutTopic ?topic .
+        ?topic a chat:AwsTopic .
+    }
+    GROUP BY ?user
+    HAVING (?count >= 3)
+    """
+    results = list(g.query(query))
+    print(f"AWS 전문 관심 사용자: {len(results)}명")
+    for row in results:
+        print(f"  - {row.user}: {row.count}회 인터랙션")
+    return results
+```
+
+---
+
+### 9️⃣ T-Box 시험 체크리스트
+
+| 검증 항목 | 방법 | 도구 |
+|---|---|---|
+| **일관성(Consistency)** | 추론기로 모순 없는지 확인 | HermiT/Pellet, Protégé |
+| **완전성(Completeness)** | CQ 목록 모두 SPARQL로 답 가능한지 | rdflib, SPARQL |
+| **정확성(Correctness)** | SubClassOf·Domain/Range 정의 검증 | Python unittest |
+| **추론 검증(Reasoning)** | 예상 추론 결과가 나오는지 | HermiT, 자동화 테스트 |
+| **CQ 충족도** | 각 CQ에 대한 쿼리 결과 존재 여부 | SPARQL 쿼리 실행 |
+| **제약 조건** | Cardinality, Domain, Range 위반 없는지 | 추론기 |
+| **순환 참조 없음** | SubClassOf 사이클 없는지 | 그래프 탐색 알고리즘 |
+
+---
+
+### 🔟 도구 선택 가이드
+
+| 도구 | 용도 | 비용 |
+|---|---|---|
+| **Protégé** | GUI 기반 OWL 편집·추론 검사 | 무료 |
+| **HermiT** | OWL DL 완전 추론기 (Protégé 내장) | 무료 |
+| **Pellet** | HermiT + 규칙 추론 | 무료 |
+| **rdflib (Python)** | 코드 기반 자동화 검증 | 무료 |
+| **Apache Jena** | Java 기반 RDF 처리·추론 | 무료 |
+| **Graphiti (Pydantic)** | AI 에이전트용 T-Box 정의·검증 | 무료 오픈소스 |
+
+---
+
+### 📝 핵심 요약
+
+```
+T-Box 설계 및 시험 7단계 요약
+─────────────────────────────────────────────────────
+1️⃣ CQ 작성        → "어떤 질문에 답해야 하나?"
+2️⃣ 개념 모델링    → 클래스·관계·속성·제약 설계
+3️⃣ OWL 구현       → Turtle 파일 또는 Pydantic 모델
+4️⃣ 일관성 검사    → HermiT/Pellet으로 모순 확인
+5️⃣ 추론 검증      → 예상 추론 결과 자동 테스트
+6️⃣ A-Box 통합 시험→ 실제 인스턴스 붙여서 CQ 검증
+7️⃣ 반복 개선      → 실패한 테스트 기반 수정
+```
+
+> 💡 **경수님 프로젝트 적용 팁**: Graphiti를 사용하신다면 **Pydantic 모델이 T-Box**예요! Python `unittest`로 엔티티 타입 정의와 관계를 검증하면 충분히 실용적인 T-Box 시험이 가능합니다. 🎯
+
+더 궁금하신 부분이 있으면 말씀해 주세요 😊
+- Protégé 실습 단계별 가이드
+- 경수님 Graphiti 프로젝트에 맞춘 T-Box 설계 예시 코드
+- SPARQL로 CQ 검증하는 실전 예제
+
+
+
+
+
+
+
+
+
+---
 ## 2️⃣ OWL (Web Ontology Language)
 
 ### 정의
