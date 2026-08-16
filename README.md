@@ -121,7 +121,41 @@ Agent는 도구(MCP)·Skill 지시문을 받아 ReAct 루프로 동작합니다.
 
 
 
-## Graphify T-Box의 실제 엣지 타입 전체 목록
+
+### ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
+
+| **LLM Wiki가 유리한 경우** | **RAG가 유리한 경우** |
+|---|---|
+| 여러 문서를 넘나드는 복잡한 질문 | 실시간으로 변하는 대규모 데이터 |
+| 깊은 이해와 합성이 필요할 때 | 단순 사실 조회 |
+| 전문가가 직접 큐레이션한 코퍼스 | 출처(provenance) 추적이 중요할 때 |
+| 구조적 추론이 필요한 질문 | 빠른 배포가 필요할 때 |
+
+> 💡 **핵심 비유**: RAG는 데이터베이스 쿼리, LLM Wiki는 제2의 두뇌 — 경쟁 관계가 아니라 상호 보완 관계!
+
+agent-wiki에서는 **채팅 Agent(필요 시 RAG MCP)** 와 **그래프 문서검색**을 함께 둘 수 있습니다. 그래프 쪽은 임베딩 인덱스 없이 `graph.json` 순회 + 원문 excerpt로 답을 보강합니다.
+
+
+
+
+
+
+## Graph 
+
+agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
+
+| | **Knowledge Graph** | **Wiki Graph** |
+|--|---------------------|----------------|
+| 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
+| 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
+| 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
+| API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
+| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
+| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
+| Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
+
+
+### Graphify T-Box의 실제 엣지 타입 전체 목록
 
 > **Graphify의 T-Box는 `extract.py` 소스 코드 안에 하드코딩된 엣지 타입(relation 값) 집합입니다.**
 > OWL/RDF처럼 별도 온톨로지 파일이 없고, 별도 config로 사용자 정의도 안 돼요!
@@ -174,33 +208,6 @@ Graphify T-Box 위치:
 > 💡 이게 Graphify만의 T-Box 차별점이에요! OWL/RDF에는 없는 **신뢰도 메타데이터** 개념이에요.
 
 
-### ⚖️ LLM Wiki vs RAG — 언제 뭘 쓸까?
-
-| **LLM Wiki가 유리한 경우** | **RAG가 유리한 경우** |
-|---|---|
-| 여러 문서를 넘나드는 복잡한 질문 | 실시간으로 변하는 대규모 데이터 |
-| 깊은 이해와 합성이 필요할 때 | 단순 사실 조회 |
-| 전문가가 직접 큐레이션한 코퍼스 | 출처(provenance) 추적이 중요할 때 |
-| 구조적 추론이 필요한 질문 | 빠른 배포가 필요할 때 |
-
-> 💡 **핵심 비유**: RAG는 데이터베이스 쿼리, LLM Wiki는 제2의 두뇌 — 경쟁 관계가 아니라 상호 보완 관계!
-
-agent-wiki에서는 **채팅 Agent(필요 시 RAG MCP)** 와 **그래프 문서검색**을 함께 둘 수 있습니다. 그래프 쪽은 임베딩 인덱스 없이 `graph.json` 순회 + 원문 excerpt로 답을 보강합니다.
-
-
-### Graph 
-
-agent-wiki에는 **두 개의 독립 그래프**가 있습니다. 입력·저장 위치·파이프라인이 다르며, 시각화 패턴(Force Atlas / Neo4j Explore / Holistic View)과 문서검색 UI는 공통입니다.
-
-| | **Knowledge Graph** | **Wiki Graph** |
-|--|---------------------|----------------|
-| 원본 | Agent 대화 (`tasks.db`) | `raw` / Sources / Wiki 폴더 |
-| 루트 | `.session_storage/{user}/graph/` | `.session_storage/{user}/wiki/` |
-| 산출 | `out/graph.html` · `graph.json` | `wiki/graphify-out/app-graph.html` · `graph.json` |
-| API | `GET /api/graph`, `POST /api/graph/query` | `GET /api/wiki/graph`, `POST /api/wiki/query` |
-| 갱신 | Settings → **Knowledge** → Sync (`POST /api/graph/rebuild`) | Settings → Wiki → **Sync** |
-| 보기 | Settings → Knowledge → **Graph** / 브랜드 클릭 | Settings → Wiki → **Graph** |
-| Agent MCP | **`graph memory`** → `recall_graph_memory` | **`wiki`** → `recall_wiki` |
 
 ### T-Box와 A-Box의 분리 방식
 
@@ -251,6 +258,108 @@ uses        (INFERRED)             DigestAuth --uses--> Response
 │         links: [{source, target, relation, ...}]    │
 └─────────────────────────────────────────────────────┘
 ```
+
+
+
+### Graph 활용
+
+Knowledge Graph·Wiki Graph 모두 `graph.json`을 **vis-network** HTML로 publish합니다. 같은 그래프 데이터를 `patterns.py`가 세 가지 UI 패턴으로 렌더합니다. Knowledge Graph는 사용자 `settings.json`의 `graph_pattern`, Wiki Graph는 `graphify-out/.wiki_graph_pattern`에 저장됩니다. 패턴 전환 시 **재추출 없이 HTML만** 다시 생성합니다.
+
+
+```text
+Sidebar "Agent wiki (user)" 클릭
+  → KnowledgeGraphModal + iframe
+  → GET /api/graph  (세션 쿠키의 graph.html)
+```
+
+| API | 역할 |
+|-----|------|
+| `GET /api/graph` | 사용자 그래프 HTML 인라인 표시 |
+| `GET /api/graph/status` | 존재 여부 · job 상태 · enabled |
+| `POST /api/graph/rebuild` | 백그라운드 파이프라인 enqueue |
+| `POST /api/graph/query` | Knowledge Graph 문서검색 (BFS/DFS + excerpt) |
+| `GET /api/wiki/graph` | Wiki Graph HTML |
+| `POST /api/wiki/query` | Wiki Graph 문서검색 (동일 엔진) |
+
+그래프가 아직 없으면 안내 HTML이 뜨고, 추출이 끝나면 모달을 다시 열면 됩니다. 구버전 HTML에 문서검색 UI가 없으면 서버가 `graph.json`으로부터 republish를 시도합니다.
+
+| 패턴 | 메뉴 이름 | 구현 | 레이아웃 / 비주얼 |
+|------|-----------|------|-------------------|
+| **pattern1** | Force Atlas | [pattern1_html.py](./graph/lib/pattern1_html.py) | `forceAtlas2Based`. degree에 비례한 큰 `dot` 노드, 커뮤니티 컬러 곡선 엣지(`curvedCCW`), 관계 라벨. INFERRED는 점선. |
+| **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | Neo4j Explore/Bloom 스타일. 어두운 캔버스, 작은 `dot` 노드, 얇은 회색 연속 곡선 엣지, 허브 위주 라벨. physics는 `barnesHut`. |
+| **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | Neo4j Browser식 전체 overview. 로드 직후 `fit`. `ellipse` 라벨 노드 + 관계명(대문자) 엣지. `forceAtlas2Based`. |
+
+공통 UI: 그룹(커뮤니티) 범례 필터, 좌상단 **문서검색**(Enter로 쿼리, 검색창·결과가 하나의 카드), 노드 클릭 상세(출처·관계), 패턴 전환 버튼.
+
+```text
+graph.json (+ communities)
+        │
+        ▼
+  patterns.write_pattern_html(pattern1|2|3)
+        │
+        ▼
+  out/graph.html  ← Ask panel (ask_panel.py) 삽입
+        │  POST /api/graph/query
+        ▼
+  application/graph_query.query_user_graph()
+```
+
+
+### Graph Pattern
+
+아래의 패턴들은 **같은 `graph.json`**을 쓰며, 차이점은 “무엇을 한눈에 보이게 하느냐”입니다.
+
+#### Force Atlas (pattern1)
+
+`forceAtlas2Based`로 커뮤니티가 벌어지고, degree가 큰 노드는 크게 보이며 엣지는 커뮤니티 컬러 + 관계 라벨(INFERRED는 점선)을 표시합니다.
+
+| 장점 | 단점 |
+|------|------|
+| 허브·커뮤니티 구조가 직관적 | 노드·라벨이 많아 밀집 그래프에서 번잡 |
+| 관계 종류·신뢰도를 캔버스에서 바로 확인 | Force Atlas 계산이 상대적으로 무거움 |
+| 탐색·설명용으로 균형이 좋음 | “전체 지형”보다 “국소 구조” 중심 |
+
+**적합:** 개념이 어떻게 묶이고 어떤 관계인지 설명할 때.
+
+Force atlas로 보여주는 graph 화면입니다.
+
+<img width="900" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
+
+#### Neo4j Explore (pattern2)
+
+Explore/Bloom 느낌의 **작은 점 + 얇은 회색 곡선**. 엣지 라벨·화살표는 거의 숨기고, physics는 빠른 `barnesHut`입니다.
+
+| 장점 | 단점 |
+|------|------|
+| 대규모에서도 지형·클러스터가 잘 보임 | 관계명·방향은 hover/상세로만 확인 |
+| 시각 노이즈가 적어 스크롤·줌이 편함 | 허브 크기 차이가 작아 중요도 파악이 약함 |
+| 안정화·렌더가 비교적 가벼움 | “누가 누구를 참조하는지” 설명에는 약함 |
+
+**적합:** 큰 그래프의 전체 모양·밀도·커뮤니티 분포를 훑을 때.
+
+Neo4j explore로 보여주는 graph 화면입니다.
+
+<img width="900" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
+
+#### Holistic View (pattern3)
+
+로드 직후 `fit`으로 전체를 담고, `ellipse` 라벨 노드 + 관계명(대문자)·화살표를 표시합니다. Force Atlas이지만 overlap 회피를 강하게 잡습니다.
+
+| 장점 | 단점 |
+|------|------|
+| 전체 overview + 관계 라벨을 동시에 보여줌 | 엣지 라벨이 겹치면 가독성이 급격히 떨어짐 |
+| Neo4j Browser식 “스키마 한눈에”에 가까움 | 노드 수·엣지 수가 많으면 글자가 포화 |
+| 관계 중심 설명·데모에 유리 | Explore만큼 깔끔한 지형감은 약함 |
+
+**적합:** 중간 규모에서 관계 종류까지 포함한 한 장 요약을 보여줄 때.
+
+**한 줄 요약:** 구조·허브 → **Force Atlas**, 규모·지형 → **Neo4j Explore**, 관계 라벨까지 한눈에 → **Holistic View**.
+
+Holistic view의 graph 화면입니다.
+
+<img width="900" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
+
+
 
 
 
@@ -516,107 +625,6 @@ Configure에서 URL 추가 시 `graphify.ingest`: 웹페이지는 `html2text`로
 
 
 
-
-
----
-
-## Graph
-
-Knowledge Graph·Wiki Graph 모두 `graph.json`을 **vis-network** HTML로 publish합니다. 같은 그래프 데이터를 `patterns.py`가 세 가지 UI 패턴으로 렌더합니다. Knowledge Graph는 사용자 `settings.json`의 `graph_pattern`, Wiki Graph는 `graphify-out/.wiki_graph_pattern`에 저장됩니다. 패턴 전환 시 **재추출 없이 HTML만** 다시 생성합니다.
-
-### UI에서 보기
-
-```text
-Sidebar "Agent wiki (user)" 클릭
-  → KnowledgeGraphModal + iframe
-  → GET /api/graph  (세션 쿠키의 graph.html)
-```
-
-| API | 역할 |
-|-----|------|
-| `GET /api/graph` | 사용자 그래프 HTML 인라인 표시 |
-| `GET /api/graph/status` | 존재 여부 · job 상태 · enabled |
-| `POST /api/graph/rebuild` | 백그라운드 파이프라인 enqueue |
-| `POST /api/graph/query` | Knowledge Graph 문서검색 (BFS/DFS + excerpt) |
-| `GET /api/wiki/graph` | Wiki Graph HTML |
-| `POST /api/wiki/query` | Wiki Graph 문서검색 (동일 엔진) |
-
-그래프가 아직 없으면 안내 HTML이 뜨고, 추출이 끝나면 모달을 다시 열면 됩니다. 구버전 HTML에 문서검색 UI가 없으면 서버가 `graph.json`으로부터 republish를 시도합니다.
-
-| 패턴 | 메뉴 이름 | 구현 | 레이아웃 / 비주얼 |
-|------|-----------|------|-------------------|
-| **pattern1** | Force Atlas | [pattern1_html.py](./graph/lib/pattern1_html.py) | `forceAtlas2Based`. degree에 비례한 큰 `dot` 노드, 커뮤니티 컬러 곡선 엣지(`curvedCCW`), 관계 라벨. INFERRED는 점선. |
-| **pattern2** | Neo4j Explore | [pattern2_html.py](./graph/lib/pattern2_html.py) | Neo4j Explore/Bloom 스타일. 어두운 캔버스, 작은 `dot` 노드, 얇은 회색 연속 곡선 엣지, 허브 위주 라벨. physics는 `barnesHut`. |
-| **pattern3** | Holistic View | [pattern3_html.py](./graph/lib/pattern3_html.py) | Neo4j Browser식 전체 overview. 로드 직후 `fit`. `ellipse` 라벨 노드 + 관계명(대문자) 엣지. `forceAtlas2Based`. |
-
-공통 UI: 그룹(커뮤니티) 범례 필터, 좌상단 **문서검색**(Enter로 쿼리, 검색창·결과가 하나의 카드), 노드 클릭 상세(출처·관계), 패턴 전환 버튼.
-
-```text
-graph.json (+ communities)
-        │
-        ▼
-  patterns.write_pattern_html(pattern1|2|3)
-        │
-        ▼
-  out/graph.html  ← Ask panel (ask_panel.py) 삽입
-        │  POST /api/graph/query
-        ▼
-  application/graph_query.query_user_graph()
-```
-
-### 패턴별 특징과 장단점
-
-세 패턴은 **같은 `graph.json`**을 쓰며, 차이점은 “무엇을 한눈에 보이게 하느냐”입니다.
-
-#### Force Atlas (pattern1)
-
-`forceAtlas2Based`로 커뮤니티가 벌어지고, degree가 큰 노드는 크게 보이며 엣지는 커뮤니티 컬러 + 관계 라벨(INFERRED는 점선)을 표시합니다.
-
-| 장점 | 단점 |
-|------|------|
-| 허브·커뮤니티 구조가 직관적 | 노드·라벨이 많아 밀집 그래프에서 번잡 |
-| 관계 종류·신뢰도를 캔버스에서 바로 확인 | Force Atlas 계산이 상대적으로 무거움 |
-| 탐색·설명용으로 균형이 좋음 | “전체 지형”보다 “국소 구조” 중심 |
-
-**적합:** 개념이 어떻게 묶이고 어떤 관계인지 설명할 때.
-
-Force atlas로 보여주는 graph 화면입니다.
-
-<img width="900" src="https://github.com/user-attachments/assets/bd5b4de7-4cbb-41ce-9c0a-fd11d192226d" />
-
-#### Neo4j Explore (pattern2)
-
-Explore/Bloom 느낌의 **작은 점 + 얇은 회색 곡선**. 엣지 라벨·화살표는 거의 숨기고, physics는 빠른 `barnesHut`입니다.
-
-| 장점 | 단점 |
-|------|------|
-| 대규모에서도 지형·클러스터가 잘 보임 | 관계명·방향은 hover/상세로만 확인 |
-| 시각 노이즈가 적어 스크롤·줌이 편함 | 허브 크기 차이가 작아 중요도 파악이 약함 |
-| 안정화·렌더가 비교적 가벼움 | “누가 누구를 참조하는지” 설명에는 약함 |
-
-**적합:** 큰 그래프의 전체 모양·밀도·커뮤니티 분포를 훑을 때.
-
-Neo4j explore로 보여주는 graph 화면입니다.
-
-<img width="900" alt="image" src="https://github.com/user-attachments/assets/b0ac83de-fd49-4f8b-9998-5b1ef78d109a" />
-
-#### Holistic View (pattern3)
-
-로드 직후 `fit`으로 전체를 담고, `ellipse` 라벨 노드 + 관계명(대문자)·화살표를 표시합니다. Force Atlas이지만 overlap 회피를 강하게 잡습니다.
-
-| 장점 | 단점 |
-|------|------|
-| 전체 overview + 관계 라벨을 동시에 보여줌 | 엣지 라벨이 겹치면 가독성이 급격히 떨어짐 |
-| Neo4j Browser식 “스키마 한눈에”에 가까움 | 노드 수·엣지 수가 많으면 글자가 포화 |
-| 관계 중심 설명·데모에 유리 | Explore만큼 깔끔한 지형감은 약함 |
-
-**적합:** 중간 규모에서 관계 종류까지 포함한 한 장 요약을 보여줄 때.
-
-**한 줄 요약:** 구조·허브 → **Force Atlas**, 규모·지형 → **Neo4j Explore**, 관계 라벨까지 한눈에 → **Holistic View**.
-
-Holistic view의 graph 화면입니다.
-
-<img width="900" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
 
 
 ### Graph 추출
