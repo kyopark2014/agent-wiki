@@ -521,9 +521,100 @@ Holistic view의 graph 화면입니다.
 <img width="900" alt="image" src="https://github.com/user-attachments/assets/6a5ee1d4-dd66-4d8f-bcad-db66d95f429e" />
 
 
+### Graph 추출
 
+그래프는 **구조 추출(AST)** 과 **시맨틱 추출(LLM)** 을 합쳐 만듭니다. 관계는 Leiden/Louvain이 만들어 주지 않고, LLM·AST가 edge JSON으로 명시한 뒤 그 위에서만 커뮤니티를 나눕니다.
 
+| 경로 | 대상 | 구현 | LLM? |
+|------|------|------|------|
+| **AST** | 코드 (.py, .ts, .go, …) | `graphify.extract` | 없음 (import·호출 등 결정적) |
+| **시맨틱** | 문서·논문 (.md 스테이징 후) | Wiki Sync: [`graph/lib/semantic.py`](./graph/lib/semantic.py) · Skill: 서브에이전트 | 있음 |
 
+```text
+detect → AST extract + semantic extract (병렬 가능)
+  → merge (.graphify_extract.json)
+  → build_from_json → cluster → graph.json / GRAPH_REPORT.md / HTML
+```
+
+- **Wiki Sync / Knowledge Graph 파이프라인:** Cursor `/graphify` Skill 대신 LiteLLM(또는 Bedrock)이 `EXTRACT_SYSTEM` 프롬프트로 청크별 JSON을 뽑습니다. chunk 크기는 Skill(20–25)보다 작은 **8**입니다.
+- **Cursor `/graphify` Skill:** 동일 스키마의 서브에이전트 프롬프트를 청크마다 병렬 디스패치합니다. (이미지 vision·영상 Whisper는 Skill/CLI만)
+
+#### 시맨틱 추출 프롬프트
+
+소스: [`graph/lib/semantic.py`](./graph/lib/semantic.py) (`EXTRACT_SYSTEM` + `extract_chunk`). 업스트림 [graphify Skill](https://github.com/safishamsi/graphify) Part B와 동일 계열입니다.
+
+**System prompt (`EXTRACT_SYSTEM`):**
+
+```python
+EXTRACT_SYSTEM = """You are a graphify extraction agent. Read the documents and extract a knowledge graph fragment.
+Output ONLY valid JSON matching the schema - no explanation, no markdown fences, no preamble.
+
+Rules:
+- EXTRACTED: relationship explicit in source (import, call, citation, "see §3.2")
+- INFERRED: reasonable inference (shared data structure, implied dependency)
+- AMBIGUOUS: uncertain - flag for review, do not omit
+
+Doc files: extract named concepts, entities, citations. Also extract rationale — sections that explain WHY a decision was made, trade-offs chosen, or design intent. These become nodes with `rationale_for` edges pointing to the concept they explain.
+
+Semantic similarity: if two concepts solve the same problem without structural link, add `semantically_similar_to` (INFERRED, confidence_score 0.6-0.95).
+
+Hyperedges: if 3+ nodes clearly participate together beyond pairwise edges, add up to 3 hyperedges.
+
+If a file has YAML frontmatter (--- ... ---), copy source_url, captured_at, author, contributor onto every node from that file.
+Also copy user_id from frontmatter into author when author is null.
+
+confidence_score is REQUIRED on every edge:
+- EXTRACTED: always 1.0
+- INFERRED: 0.6-0.9 typically
+- AMBIGUOUS: 0.1-0.3
+
+Output exactly this JSON shape:
+{"nodes":[{"id":"filestem_entityname","label":"Human Readable Name","file_type":"document","source_file":"relative/path","source_location":null,"source_url":null,"captured_at":null,"author":null,"contributor":null}],"edges":[{"source":"node_id","target":"node_id","relation":"calls|implements|references|cites|conceptually_related_to|shares_data_with|semantically_similar_to|rationale_for","confidence":"EXTRACTED|INFERRED|AMBIGUOUS","confidence_score":1.0,"source_file":"relative/path","source_location":null,"weight":1.0}],"hyperedges":[{"id":"snake_case_id","label":"Human Readable Label","nodes":["n1","n2","n3"],"relation":"participate_in|implement|form","confidence":"EXTRACTED|INFERRED","confidence_score":0.75,"source_file":"relative/path"}],"input_tokens":0,"output_tokens":0}
+"""
+```
+
+**User message 구성 (`extract_chunk`):** 청크 파일 본문을 붙이고, `--deep`이면 DEEP_MODE 한 줄을 추가합니다.
+
+```python
+def extract_chunk(files, *, corpus_root, chunk_num, total_chunks, deep=False, model=None):
+    parts = [f"Files (chunk {chunk_num} of {total_chunks}):"]
+    for path in files:
+        rel = _rel_path(path, corpus_root)
+        parts.append(f"\n===== FILE: {rel} =====\n{_read_doc(path)}")
+
+    if deep:
+        parts.append(
+            "\nDEEP_MODE: be aggressive with INFERRED edges - indirect deps, "
+            "shared assumptions, latent couplings. Mark uncertain ones AMBIGUOUS."
+        )
+
+    user = "\n".join(parts)
+    data = chat_json(
+        [
+            {"role": "system", "content": EXTRACT_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        model=model,
+    )
+    # …
+```
+
+| 규칙 | 내용 |
+|------|------|
+| **EXTRACTED** | 원문에 명시된 관계 · `confidence_score` = 1.0 |
+| **INFERRED** | 합리적 추론 · 보통 0.6–0.9 |
+| **AMBIGUOUS** | 불확실해도 생략하지 않음 · 0.1–0.3 |
+| **`--deep`** | INFERRED를 공격적으로 · 애매하면 AMBIGUOUS |
+
+#### 실행 방법
+
+| 방식 | 예시 |
+|------|------|
+| 앱 Wiki Sync | Settings → Wiki → **Sync** (`sync_wiki.py`) |
+| Knowledge Graph 파이프라인 | `cd graph && python run_pipeline.py` / `run_extract.py` |
+| Cursor Skill | `/graphify <path>` · 증분 `/graphify <path> --update` · 깊은 추론 `--mode deep` |
+
+증분 시 SHA256 **cache**로 변경 파일만 재추출합니다. 코드만 바뀌면 AST만 돌리고 시맨틱 LLM은 건너뜁니다.
 
 ---
 
