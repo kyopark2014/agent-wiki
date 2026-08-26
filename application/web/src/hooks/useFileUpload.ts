@@ -164,7 +164,12 @@ export function useFileUpload({ disabled = false }: UseFileUploadOptions = {}) {
         onComplete?.(result.message);
       } catch (err) {
         console.error("Wiki document upload failed", err);
-        setUploadError("Wiki 업로드에 실패했습니다. 다시 시도해 주세요.");
+        const detail = err instanceof Error ? err.message : "";
+        setUploadError(
+          detail
+            ? detail.replace(/^Wiki upload failed:\s*/i, "")
+            : "Wiki 업로드에 실패했습니다. 다시 시도해 주세요.",
+        );
       } finally {
         setUploading(false);
       }

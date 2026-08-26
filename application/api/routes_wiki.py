@@ -21,7 +21,9 @@ from application import utils
 
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
-_MAX_RAW_UPLOAD_BYTES = 80 * 1024 * 1024  # 80 MiB per file
+# Multipart /api/wiki/raw still caps at ~ALB body size; prefer /raw/presign for large files.
+_MAX_RAW_UPLOAD_BYTES = 80 * 1024 * 1024  # 80 MiB per file (multipart only)
+_MAX_RAW_PRESIGN_BYTES = 5 * 1024 * 1024 * 1024  # 5 GiB (S3 single PUT)
 _MAX_RAW_UPLOAD_FILES = 30
 
 
@@ -50,6 +52,32 @@ class WikiSourcesPut(BaseModel):
 
 class WikiUrlIngest(BaseModel):
     url: str = Field(..., min_length=1, max_length=2048)
+
+
+class WikiRawPresignRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    size: int | None = Field(default=None, ge=0)
+    content_type: str | None = None
+
+
+class WikiRawCompleteRequest(BaseModel):
+    file_name: str = Field(..., min_length=1)
+    s3_key: str = Field(..., min_length=1)
+    size: int | None = Field(default=None, ge=0)
+
+
+def _assert_wiki_presign_size(size: int | None) -> None:
+    if size is None:
+        return
+    if size < 0:
+        raise HTTPException(status_code=400, detail="Invalid file size")
+    if size == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if size > _MAX_RAW_PRESIGN_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="File exceeds the 5 GiB upload limit",
+        )
 
 
 @router.get("/status")
@@ -169,12 +197,73 @@ def ingest_wiki_url(body: WikiUrlIngest, request: Request) -> dict:
     }
 
 
+@router.post("/raw/presign")
+def wiki_raw_presign(request: Request, body: WikiRawPresignRequest) -> dict:
+    """Return a short-lived S3 PUT URL so the browser can upload past ECS body limits."""
+    user_id = require_user_id(request)
+    _assert_wiki_presign_size(body.size)
+    name = (body.file_name or "").strip() or "upload.bin"
+    try:
+        presign = utils.generate_wiki_raw_presigned_put(name, user_id=user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"업로드 URL 생성 실패: {exc}",
+        ) from exc
+    if not presign or not presign.get("upload_url"):
+        raise HTTPException(status_code=500, detail="업로드 URL 생성 실패")
+    return {
+        "ok": True,
+        "file_name": presign["file_name"],
+        "s3_key": presign["s3_key"],
+        "content_type": presign.get("content_type"),
+        "upload_url": presign["upload_url"],
+        "headers": presign.get("headers") or {},
+        "expires_in": presign.get("expires_in"),
+    }
+
+
+@router.post("/raw/complete")
+def wiki_raw_complete(request: Request, body: WikiRawCompleteRequest) -> dict:
+    """Confirm a presigned PUT and copy the object into local ``{wiki}/raw``."""
+    user_id = require_user_id(request)
+    _assert_wiki_presign_size(body.size)
+    try:
+        result = utils.save_wiki_raw_from_s3(
+            file_name=body.file_name,
+            s3_key=body.s3_key,
+            user_id=user_id,
+            expected_size=body.size,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"문서 저장 실패: {exc}",
+        ) from exc
+
+    return {
+        "wiki_dir": result["wiki_dir"],
+        "raw_dir": result["raw_dir"],
+        "saved": result["saved"],
+        "count": result["count"],
+        "files": result.get("files") or utils.get_wiki_source_files(user_id),
+    }
+
+
 @router.post("/raw")
 async def upload_wiki_raw_files(
     request: Request,
     files: list[UploadFile] = File(...),
 ) -> dict:
-    """Copy uploaded documents into the user's ``{wiki}/raw`` for later Sync."""
+    """Copy uploaded documents into the user's ``{wiki}/raw`` for later Sync.
+
+    Prefer ``/raw/presign`` + browser PUT for large files (>~80MB) so the body
+    does not traverse ECS/ALB.
+    """
     user_id = require_user_id(request)
     if not files:
         raise HTTPException(status_code=400, detail="업로드할 파일이 없습니다.")
@@ -196,7 +285,8 @@ async def upload_wiki_raw_files(
                     status_code=400,
                     detail=(
                         f"파일이 너무 큽니다: {name} "
-                        f"(최대 {_MAX_RAW_UPLOAD_BYTES // (1024 * 1024)}MB)"
+                        f"(최대 {_MAX_RAW_UPLOAD_BYTES // (1024 * 1024)}MB). "
+                        "대용량은 presigned 업로드를 사용하세요."
                     ),
                 )
             payloads.append((name, data))
@@ -343,7 +433,7 @@ def query_wiki_graph(body: WikiQueryRequest, request: Request) -> dict:
             detail="Wiki 그래프가 아직 없습니다. Settings → Wiki → Sync를 실행하세요.",
         )
     wiki_root = Path(utils.get_user_wiki_dir(user_id))
-    allowed = [wiki_root, wiki_root / "raw", wiki_root / "graphify-out"]
+    allowed = [wiki_root, wiki_root / "raw", wiki_root / "graphify-out", wiki_root / "graphify-out" / "converted"]
     for src in utils.get_wiki_source_folders(user_id):
         allowed.append(Path(src))
     try:

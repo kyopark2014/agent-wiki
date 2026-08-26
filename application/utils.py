@@ -4,6 +4,7 @@ import json
 import traceback
 import boto3
 import os
+from contextlib import contextmanager
 from urllib import parse
 from botocore.exceptions import ClientError
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
@@ -30,6 +31,30 @@ SESSION_STORAGE_DIR = os.environ.get(
     os.path.join(workingDir, ".session_storage"),
 )
 SKILLS_DIR = os.path.join(workingDir, "skills")
+
+# S3 staging prefix for browser presigned PUTs (wiki-upload / session upload).
+S3_FILES_SESSION_PREFIX = "agentcore-sessions"
+
+_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+)
+
+
+@contextmanager
+def _without_env_proxies():
+    """Drop HTTP(S)_PROXY for the block (Cursor agent proxies break local boto3)."""
+    saved = {key: os.environ.pop(key, None) for key in _PROXY_ENV_KEYS}
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is not None:
+                os.environ[key] = value
 
 
 def sanitize_user_path_segment(user_id: str | None) -> str | None:
@@ -541,6 +566,73 @@ def save_wiki_raw_uploads(
         "raw_dir": str(raw_dir),
         "saved": saved,
         "count": len(saved),
+        "files": file_history,
+    }
+
+
+def save_wiki_raw_from_s3(
+    *,
+    file_name: str,
+    s3_key: str,
+    user_id: str | None = None,
+    expected_size: int | None = None,
+) -> dict[str, object]:
+    """Copy a browser-staged S3 object into ``{user}/wiki/raw`` and register it.
+
+    Used by ``POST /api/wiki/raw/complete`` after a presigned PUT.
+    """
+    from pathlib import Path
+
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    expected_key = wiki_raw_upload_s3_key(safe_name, user_id=user_id)
+    key = (s3_key or "").strip()
+    if key != expected_key:
+        raise ValueError("Invalid upload target")
+
+    head = head_session_upload_object(key)
+    if not head:
+        raise FileNotFoundError("Uploaded object not found")
+    content_length = int(head.get("content_length") or 0)
+    if content_length <= 0:
+        raise ValueError("Empty file")
+    if expected_size is not None and content_length != expected_size:
+        raise ValueError(
+            f"Uploaded size mismatch (expected {expected_size}, got {content_length})"
+        )
+
+    wiki = Path(ensure_user_wiki_dir(user_id))
+    raw_dir = wiki / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    dest = _wiki_raw_dest_path(raw_dir, safe_name)
+    overwritten = dest.is_file()
+    size = download_s3_object_to_path(key, str(dest))
+    if size <= 0:
+        raise ValueError("Empty file")
+    if expected_size is not None and size != expected_size:
+        raise ValueError(
+            f"Downloaded size mismatch (expected {expected_size}, got {size})"
+        )
+
+    saved = {
+        "name": dest.name,
+        "path": str(dest),
+        "bytes": size,
+        "overwritten": overwritten,
+        "s3_key": key,
+    }
+    logger.info(
+        "wiki raw from S3 user=%s → %s (%s bytes%s)",
+        sanitize_user_path_segment(user_id) or "default",
+        dest,
+        size,
+        ", overwrite" if overwritten else "",
+    )
+    file_history = append_wiki_source_files([str(dest)], user_id=user_id)
+    return {
+        "wiki_dir": str(wiki),
+        "raw_dir": str(raw_dir),
+        "saved": [saved],
+        "count": 1,
         "files": file_history,
     }
 
@@ -1559,4 +1651,263 @@ def upload_to_s3(
         }
     except Exception:
         logger.error("Error uploading to S3: %s", traceback.format_exc())
+        return None
+
+
+def rag_docs_s3_key(file_name: str, user_id: str | None = None) -> str:
+    """Build ``docs/{projectName}/{user}/{file}`` key used by Knowledge Base ingest."""
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    prefix = docs_s3_prefix()
+    user_segment = _sanitize_s3_user_segment(user_id)
+    if user_segment:
+        return f"{prefix}/{user_segment}/{safe_name}"
+    return f"{prefix}/{safe_name}"
+
+
+def rag_docs_public_url(file_name: str, user_id: str | None = None) -> str | None:
+    """CloudFront/sharing URL for a docs/ object, if configured."""
+    if not sharing_url:
+        return None
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    prefix = docs_s3_prefix()
+    user_segment = _sanitize_s3_user_segment(user_id)
+    if user_segment:
+        relative = f"{prefix}/{parse.quote(user_segment)}/{parse.quote(safe_name)}"
+    else:
+        relative = f"{prefix}/{parse.quote(safe_name)}"
+    return f"{sharing_url.rstrip('/')}/{relative}"
+
+
+def generate_rag_upload_presigned_put(
+    file_name: str,
+    user_id: str | None = None,
+    *,
+    expires_in: int = 900,
+) -> dict | None:
+    """Return a browser-usable presigned PUT URL for RAG docs uploads.
+
+    Only ``Content-Type`` is signed (same as Wiki) so browser PUT matches
+    CORS/signature. Keys use :func:`docs_s3_prefix` (``docs/{projectName}/...``).
+    """
+    if not s3_bucket:
+        logger.error("s3_bucket is not configured")
+        return None
+
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    s3_key = rag_docs_s3_key(safe_name, user_id=user_id)
+    content_type = _session_upload_content_type(safe_name)
+    headers = {"Content-Type": content_type}
+    params: dict = {
+        "Bucket": s3_bucket,
+        "Key": s3_key,
+        "ContentType": content_type,
+    }
+
+    try:
+        with _without_env_proxies():
+            s3_client = _s3_client_for_presign()
+            upload_url = s3_client.generate_presigned_url(
+                ClientMethod="put_object",
+                Params=params,
+                ExpiresIn=max(60, int(expires_in)),
+                HttpMethod="PUT",
+            )
+        logger.info(
+            "rag upload presign key=%s host=%s",
+            s3_key,
+            parse.urlparse(upload_url).netloc,
+        )
+        return {
+            "file_name": safe_name,
+            "s3_key": s3_key,
+            "content_type": content_type,
+            "upload_url": upload_url,
+            "headers": headers,
+            "expires_in": max(60, int(expires_in)),
+            "url": rag_docs_public_url(safe_name, user_id=user_id),
+        }
+    except Exception:
+        logger.error(
+            "Error generating rag upload presign: %s", traceback.format_exc()
+        )
+        return None
+
+
+def _s3_client_for_presign():
+    """S3 client for browser-safe regional, virtual-hostedpresigned URLs.
+
+    Global ``*.s3.amazonaws.com`` hosts often 307-redirect to the region
+    endpoint; browsers then fail the signed PUT (403/CORS). Prefer virtual-hosted
+    ``https://{bucket}.s3.{region}.amazonaws.com/...``.
+    """
+    from botocore.config import Config
+
+    region = bedrock_region or "us-west-2"
+    return boto3.client(
+        service_name="s3",
+        region_name=region,
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
+    )
+
+
+def session_upload_s3_key(file_name: str, user_id: str | None = None) -> str:
+    """Build ``agentcore-sessions/{user}/upload/{file}`` object key."""
+    segment = _sanitize_s3_user_segment(user_id) or "default"
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    return f"{S3_FILES_SESSION_PREFIX}/{segment}/upload/{safe_name}"
+
+
+def _session_upload_content_type(file_name: str) -> str:
+    """Content-Type for session uploads; never returns ``no info``."""
+    content_type = get_contents_type(file_name)
+    if content_type == "no info":
+        return "application/octet-stream"
+    return content_type
+
+
+def generate_session_upload_presigned_put(
+    file_name: str,
+    user_id: str | None = None,
+    *,
+    expires_in: int = 900,
+) -> dict | None:
+    """Return a browser-usable presigned PUT URL for session/load-file uploads."""
+    if not s3_bucket:
+        logger.error("s3_bucket is not configured")
+        return None
+
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    s3_key = session_upload_s3_key(safe_name, user_id=user_id)
+    content_type = _session_upload_content_type(safe_name)
+    headers = {"Content-Type": content_type}
+    params: dict = {
+        "Bucket": s3_bucket,
+        "Key": s3_key,
+        "ContentType": content_type,
+    }
+
+    try:
+        with _without_env_proxies():
+            s3_client = _s3_client_for_presign()
+            upload_url = s3_client.generate_presigned_url(
+                ClientMethod="put_object",
+                Params=params,
+                ExpiresIn=max(60, int(expires_in)),
+                HttpMethod="PUT",
+            )
+        logger.info(
+            "session upload presign key=%s host=%s",
+            s3_key,
+            parse.urlparse(upload_url).netloc,
+        )
+        return {
+            "file_name": safe_name,
+            "s3_key": s3_key,
+            "content_type": content_type,
+            "upload_url": upload_url,
+            "headers": headers,
+            "expires_in": max(60, int(expires_in)),
+        }
+    except Exception:
+        logger.error(
+            "Error generating session upload presign: %s", traceback.format_exc()
+        )
+        return None
+
+
+def wiki_raw_upload_s3_key(file_name: str, user_id: str | None = None) -> str:
+    """Build ``agentcore-sessions/{user}/wiki-upload/{file}`` staging key.
+
+    Browser PUTs land here; ``/api/wiki/raw/complete`` copies into local
+    ``{user}/wiki/raw/`` for Sync.
+    """
+    segment = _sanitize_s3_user_segment(user_id) or "default"
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    return f"{S3_FILES_SESSION_PREFIX}/{segment}/wiki-upload/{safe_name}"
+
+
+def generate_wiki_raw_presigned_put(
+    file_name: str,
+    user_id: str | None = None,
+    *,
+    expires_in: int = 900,
+) -> dict | None:
+    """Return a browser-usable presigned PUT URL for Wiki raw uploads."""
+    if not s3_bucket:
+        logger.error("s3_bucket is not configured")
+        return None
+
+    safe_name = os.path.basename(file_name or "").strip() or "upload.bin"
+    s3_key = wiki_raw_upload_s3_key(safe_name, user_id=user_id)
+    content_type = _session_upload_content_type(safe_name)
+    headers = {"Content-Type": content_type}
+    params: dict = {
+        "Bucket": s3_bucket,
+        "Key": s3_key,
+        "ContentType": content_type,
+    }
+
+    try:
+        with _without_env_proxies():
+            s3_client = _s3_client_for_presign()
+            upload_url = s3_client.generate_presigned_url(
+                ClientMethod="put_object",
+                Params=params,
+                ExpiresIn=max(60, int(expires_in)),
+                HttpMethod="PUT",
+            )
+        logger.info(
+            "wiki raw upload presign key=%s host=%s",
+            s3_key,
+            parse.urlparse(upload_url).netloc,
+        )
+        return {
+            "file_name": safe_name,
+            "s3_key": s3_key,
+            "content_type": content_type,
+            "upload_url": upload_url,
+            "headers": headers,
+            "expires_in": max(60, int(expires_in)),
+        }
+    except Exception:
+        logger.error(
+            "Error generating wiki raw upload presign: %s", traceback.format_exc()
+        )
+        return None
+
+
+def download_s3_object_to_path(s3_key: str, dest_path: str) -> int:
+    """Download an S3 object to ``dest_path`` (streamed to disk). Return size."""
+    if not s3_bucket or not s3_key:
+        raise ValueError("s3_bucket/s3_key required")
+    parent = os.path.dirname(dest_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with _without_env_proxies():
+        s3_client = boto3.client(service_name="s3", region_name=bedrock_region)
+        s3_client.download_file(s3_bucket, s3_key, dest_path)
+    size = os.path.getsize(dest_path) if os.path.isfile(dest_path) else 0
+    logger.info(
+        "downloaded s3://%s/%s → %s (%s bytes)", s3_bucket, s3_key, dest_path, size
+    )
+    return size
+
+
+def head_session_upload_object(s3_key: str) -> dict | None:
+    """HEAD an object; return ``{content_length, content_type}`` or None."""
+    if not s3_bucket or not s3_key:
+        return None
+    try:
+        with _without_env_proxies():
+            s3_client = _s3_client_for_presign()
+            response = s3_client.head_object(Bucket=s3_bucket, Key=s3_key)
+        return {
+            "content_length": int(response.get("ContentLength") or 0),
+            "content_type": response.get("ContentType"),
+        }
+    except Exception:
+        logger.error("Error head_object key=%s: %s", s3_key, traceback.format_exc())
         return None
