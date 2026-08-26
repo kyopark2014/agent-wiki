@@ -331,7 +331,7 @@ export function ChatInput({
               <span className="chat-add-menu-text">
                 <span className="chat-add-menu-label">Upload to RAG</span>
                 <span className="chat-add-menu-desc">
-                  S3에 업로드하고 Knowledge Base 동기화
+                  S3로 직접 업로드하고 Knowledge Base 동기화
                 </span>
               </span>
             </button>
@@ -361,7 +361,7 @@ export function ChatInput({
               <span className="chat-add-menu-text">
                 <span className="chat-add-menu-label">Upload to Wiki</span>
                 <span className="chat-add-menu-desc">
-                  wiki/raw에 업로드하고 Wiki Sync
+                  S3로 직접 업로드 후 Wiki Sync
                 </span>
               </span>
             </button>
