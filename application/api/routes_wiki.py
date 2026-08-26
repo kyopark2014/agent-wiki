@@ -108,6 +108,7 @@ def wiki_status(request: Request) -> dict:
         "error": job.get("error"),
         "message": job.get("message"),
         "last_success_at": job.get("last_success_at"),
+        "progress": job.get("progress"),
     }
 
 

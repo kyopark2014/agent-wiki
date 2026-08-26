@@ -71,6 +71,50 @@ _EXTRACTION_FAIL = "텍스트를 추출하지 못하였습니다."
 _MAX_LLM_ATTEMPTS = 3
 
 
+def _emit_wiki_progress(
+    file_name: str,
+    *,
+    page: int | None = None,
+    page_n: int | None = None,
+    file_i: int | None = None,
+    file_n: int | None = None,
+    detail: str = "",
+) -> None:
+    """Print a structured progress line for Wiki Sync UI / logs.
+
+    Format::
+        [wiki progress] name="…" fi=… fn=… p=… pn=… pct=… | human label
+    """
+    pct: int | None = None
+    if page is not None and page_n and page_n > 0:
+        pct = max(0, min(100, int(round(100.0 * page / page_n))))
+    elif file_i is not None and file_n and file_n > 0:
+        pct = max(0, min(100, int(round(100.0 * file_i / file_n))))
+
+    safe = (file_name or "").replace('"', "")
+    parts = [f'name="{safe}"']
+    if file_i is not None and file_n is not None:
+        parts.append(f"fi={file_i}")
+        parts.append(f"fn={file_n}")
+    if page is not None and page_n is not None:
+        parts.append(f"p={page}")
+        parts.append(f"pn={page_n}")
+    if pct is not None:
+        parts.append(f"pct={pct}")
+
+    label_bits = [file_name]
+    if file_i is not None and file_n is not None:
+        label_bits.append(f"파일 {file_i}/{file_n}")
+    if page is not None and page_n is not None:
+        label_bits.append(f"페이지 {page}/{page_n}")
+    if pct is not None:
+        label_bits.append(f"{pct}%")
+    if detail:
+        label_bits.append(detail)
+    human = " · ".join(label_bits)
+    print(f"[wiki progress] {' '.join(parts)} | {human}", flush=True)
+
+
 def _get_vision_chat():
     """Create ChatBedrock for page-image → Markdown (Foundation Model Parser)."""
     import boto3
@@ -436,25 +480,38 @@ def pdf_to_text_foundation_model(
         if not images:
             raise ValueError(f"PDF에서 페이지 이미지를 만들지 못했습니다: {path}")
 
+        total_pages = len(images)
         done = _pages_done_in_md(extracted_md)
         if done:
             print(
-                f"  [foundation model] resume: {len(done)}/{len(images)} page(s) "
+                f"  [foundation model] resume: {len(done)}/{total_pages} page(s) "
                 f"already in {extracted_md.name}",
                 flush=True,
+            )
+            _emit_wiki_progress(
+                path.name,
+                page=len(done),
+                page_n=total_pages,
+                detail=f"이어하기 {len(done)}/{total_pages}",
             )
 
         for i, img in enumerate(images, 1):
             if i in done:
                 print(
-                    f"  [foundation model] [{i}/{len(images)}] skip (already in md)",
+                    f"  [foundation model] [{i}/{total_pages}] skip (already in md)",
                     flush=True,
                 )
                 continue
             img_path = Path(img)
             print(
-                f"  [foundation model] [{i}/{len(images)}] LLM extract {img_path.name}",
+                f"  [foundation model] [{i}/{total_pages}] LLM extract {img_path.name}",
                 flush=True,
+            )
+            _emit_wiki_progress(
+                path.name,
+                page=i,
+                page_n=total_pages,
+                detail="LLM 추출 중",
             )
             try:
                 body = _extract_image_markdown(img_path)
@@ -464,6 +521,12 @@ def pdf_to_text_foundation_model(
                 body = "> (빈 페이지)"
             _append_page_md(extracted_md, i, body)
             done.add(i)
+            _emit_wiki_progress(
+                path.name,
+                page=i,
+                page_n=total_pages,
+                detail="페이지 완료",
+            )
 
         if not extracted_md.is_file() or extracted_md.stat().st_size == 0:
             raise ValueError(f"Foundation Model Parser가 텍스트를 추출하지 못했습니다: {path}")
@@ -472,6 +535,12 @@ def pdf_to_text_foundation_model(
             f"  [foundation model] complete → {extracted_md} "
             f"({len(done)} page(s))",
             flush=True,
+        )
+        _emit_wiki_progress(
+            path.name,
+            page=total_pages,
+            page_n=total_pages,
+            detail="변환 완료",
         )
         return extracted_md.read_text(encoding="utf-8", errors="replace").strip()
     finally:

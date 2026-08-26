@@ -110,6 +110,14 @@ export interface WikiStatus {
   message?: string | null;
   last_success_at?: string | null;
   pid?: number | null;
+  progress?: {
+    file?: string | null;
+    file_i?: number | null;
+    file_n?: number | null;
+    page?: number | null;
+    page_n?: number | null;
+    pct?: number | null;
+  } | null;
 }
 
 export interface WikiSourcesConfig {

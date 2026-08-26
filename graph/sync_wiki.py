@@ -517,11 +517,18 @@ def _stage_docs_as_markdown(
                 return candidate
             n += 1
 
-    for src in files:
+    for idx, src in enumerate(files, 1):
         suffix = src.suffix.lower()
         if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
             print(f"  skip image (vision not in wiki sync): {src}")
             continue
+
+        print(
+            f'[wiki progress] name="{src.name}" fi={idx} fn={len(files)} '
+            f"pct={int(round(100.0 * (idx - 1) / max(len(files), 1)))} "
+            f"| {src.name} · 파일 {idx}/{len(files)} · 변환 시작",
+            flush=True,
+        )
 
         original = str(src.resolve())
         # Already under wiki graphify-out/converted (e.g. relocated Office sidecars)
@@ -560,6 +567,12 @@ def _stage_docs_as_markdown(
             dest = stage / name
             dest.write_text(body, encoding="utf-8")
             path_map[str(dest.resolve())] = original
+            print(
+                f'[wiki progress] name="{src.name}" fi={idx} fn={len(files)} pct='
+                f"{int(round(100.0 * idx / max(len(files), 1)))} "
+                f"| {src.name} · 파일 {idx}/{len(files)} · 완료",
+                flush=True,
+            )
             continue
 
         parts = _chunk_text(body, max_chars=10000)
@@ -568,7 +581,8 @@ def _stage_docs_as_markdown(
             continue
         print(
             f"  stage {src.name} → {len(parts)} markdown chunk(s) "
-            f"({sum(len(p) for p in parts)} chars)"
+            f"({sum(len(p) for p in parts)} chars)",
+            flush=True,
         )
         for i, part in enumerate(parts, 1):
             if len(parts) == 1:
@@ -582,6 +596,13 @@ def _stage_docs_as_markdown(
             )
             dest.write_text(header + part, encoding="utf-8")
             path_map[str(dest.resolve())] = original
+
+        print(
+            f'[wiki progress] name="{src.name}" fi={idx} fn={len(files)} pct='
+            f"{int(round(100.0 * idx / max(len(files), 1)))} "
+            f"| {src.name} · 파일 {idx}/{len(files)} · 완료",
+            flush=True,
+        )
 
     return path_map
 
