@@ -2,6 +2,7 @@ import asyncio
 import shutil
 import sqlite3
 import threading
+import time
 import traceback
 import boto3
 import os
@@ -1132,7 +1133,11 @@ def summary_image(img_base64, instruction):
 
 def extract_text(img_base64):    
     multimodal = get_chat()
-    query = "텍스트를 추출해서 markdown 포맷으로 변환하세요. 원문의 언어를 그대로 유지하고 번역하지 마세요. <result> tag를 붙여주세요."
+    query = (
+        "텍스트를 추출해서 markdown 포맷으로 변환하세요. "
+        "원문의 언어를 그대로 유지하고 번역하지 마세요. "
+        "<result> tag를 붙여주세요."
+    )
     
     extracted_text = ""
     messages = [
@@ -1151,18 +1156,25 @@ def extract_text(img_base64):
         )
     ]
     
-    for attempt in range(5):
-        logger.info(f"attempt: {attempt}")
+    extracted_text = ""
+    for attempt in range(1, 4):
+        logger.info(f"attempt: {attempt}/3")
         try: 
             result = multimodal.invoke(messages)
             
             extracted_text = _content_to_text(result.content)
             # print('result of text extraction from an image: ', extracted_text)
-            break
+            if len(extracted_text) >= 10:
+                break
+            logger.info(
+                f"too little text (len={len(extracted_text)}) on attempt {attempt}/3"
+            )
         except Exception:
             err_msg = traceback.format_exc()
-            logger.info(f"error message: {err_msg}")                    
-            # raise Exception ("Not able to request to LLM")
+            logger.info(f"error message: {err_msg}")
+            extracted_text = ""
+        if attempt < 3:
+            time.sleep(1)
     
     logger.info(f"Extracted_text: {extracted_text}")
     if len(extracted_text)<10:
