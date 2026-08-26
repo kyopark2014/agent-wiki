@@ -54,7 +54,7 @@ def pdf_to_images(pdf_path: str | Path, output_dir: str | Path, dpi: int = 150) 
     Existing ``page_XXX.png`` files are reused (resume-friendly).
     """
     try:
-        import fitz  # PyMuPDF
+        import pymupdf
     except ImportError:
         import subprocess
 
@@ -63,7 +63,7 @@ def pdf_to_images(pdf_path: str | Path, output_dir: str | Path, dpi: int = 150) 
             [sys.executable, "-m", "pip", "install", "pymupdf", "-q"],
             stdout=subprocess.DEVNULL,
         )
-        import fitz
+        import pymupdf
 
     pdf_path = Path(os.path.expanduser(str(pdf_path))).resolve()
     if not pdf_path.is_file():
@@ -72,11 +72,11 @@ def pdf_to_images(pdf_path: str | Path, output_dir: str | Path, dpi: int = 150) 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    doc = fitz.open(str(pdf_path))
+    doc = pymupdf.open(str(pdf_path))
     total = len(doc)
     saved: list[str] = []
     zoom = dpi / 72
-    mat = fitz.Matrix(zoom, zoom)
+    mat = pymupdf.Matrix(zoom, zoom)
 
     try:
         for i, page in enumerate(doc, start=1):
