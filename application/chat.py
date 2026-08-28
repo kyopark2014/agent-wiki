@@ -2065,6 +2065,9 @@ def append_tool_guidance_to_prompt(system_prompt: str, mcp_servers: list) -> str
     selected = {name.lower() for name in mcp_servers}
     extras: list[str] = []
 
+    if "memory" in selected:
+        extras.append(skill.MEMORY_RECALL_GUIDANCE)
+
     parallel_tools: list[str] = []
     if "wiki" in selected:
         parallel_tools.append("recall_wiki")
