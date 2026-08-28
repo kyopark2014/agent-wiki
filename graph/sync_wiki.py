@@ -428,6 +428,9 @@ def _pdf_to_text(
     *,
     use_foundation_model: bool = False,
     work_dir: Path | None = None,
+    parallel_pages: bool = True,
+    file_i: int | None = None,
+    file_n: int | None = None,
 ) -> str:
     """Extract text from a PDF for semantic staging (see ``pdf2text.py``)."""
     from pdf2text import pdf_to_text
@@ -436,6 +439,9 @@ def _pdf_to_text(
         path,
         use_foundation_model=use_foundation_model,
         work_dir=work_dir,
+        parallel_pages=parallel_pages,
+        file_i=file_i,
+        file_n=file_n,
     )
 
 
@@ -444,6 +450,9 @@ def _doc_to_markdown_body(
     *,
     use_foundation_model: bool = False,
     pdf_work_dir: Path | None = None,
+    parallel_pages: bool = True,
+    file_i: int | None = None,
+    file_n: int | None = None,
 ) -> str | None:
     """Return markdown/plain text body for semantic extraction, or None if unsupported."""
     suffix = src.suffix.lower()
@@ -456,6 +465,9 @@ def _doc_to_markdown_body(
             src,
             use_foundation_model=use_foundation_model,
             work_dir=pdf_work_dir,
+            parallel_pages=parallel_pages,
+            file_i=file_i,
+            file_n=file_n,
         ).strip()
         if not body:
             raise ValueError(f"PDF에서 텍스트를 추출하지 못했습니다: {src}")
@@ -492,6 +504,7 @@ def _stage_docs_as_markdown(
     stage: Path,
     *,
     use_foundation_model: bool = False,
+    parallel_pages: bool = True,
 ) -> dict[str, str]:
     """Copy/convert docs into ``stage`` as ``.md`` files.
 
@@ -554,6 +567,9 @@ def _stage_docs_as_markdown(
                 src,
                 use_foundation_model=use_foundation_model,
                 pdf_work_dir=pdf_work,
+                parallel_pages=parallel_pages,
+                file_i=idx,
+                file_n=len(files),
             )
         except Exception as exc:
             print(f"  WARNING: failed to convert {src}: {exc}")
@@ -613,7 +629,7 @@ def _incomplete_foundation_pdfs(
     """PDFs with partial ``.pdf_pages/.../extracted.md`` that should be resumed."""
     import hashlib
 
-    from pdf2text import _EXTRACTED_NAME, _pages_done_in_md
+    from pdf2text import _EXTRACTED_NAME, _collect_done_pages
 
     root = stage / ".pdf_pages"
     if not root.is_dir():
@@ -658,7 +674,12 @@ def _incomplete_foundation_pdfs(
         pngs = (
             sorted(pages_dir.glob("page_*.png")) if pages_dir.is_dir() else []
         )
-        done = _pages_done_in_md(work / _EXTRACTED_NAME)
+        total = len(pngs) if pngs else 0
+        done = _collect_done_pages(
+            work / _EXTRACTED_NAME,
+            pages_dir if pages_dir.is_dir() else work / "pages",
+            total,
+        )
         if not pngs and not done:
             continue
         if not done or (pngs and len(done) < len(pngs)):
@@ -786,6 +807,7 @@ def _run_semantic(
     out: Path,
     deep: bool,
     use_foundation_model: bool = False,
+    parallel_pages: bool = True,
 ) -> dict[str, Any]:
     from lib.semantic import extract_corpus  # type: ignore
 
@@ -808,7 +830,10 @@ def _run_semantic(
             flush=True,
         )
         path_map = _stage_docs_as_markdown(
-            files, stage, use_foundation_model=use_foundation_model
+            files,
+            stage,
+            use_foundation_model=use_foundation_model,
+            parallel_pages=parallel_pages,
         )
         staged_mds = list(path_map.keys())
         if not staged_mds:
@@ -953,8 +978,20 @@ def run_sync(
     input_path: str | None = None,
     input_paths: list[str] | None = None,
     deep: bool = False,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Run graphify sync for a user's wiki folder. Returns a status summary."""
+    model_name = (model or "").strip()
+    if model_name:
+        os.environ["WIKI_VISION_MODEL"] = model_name
+        print(f"[wiki sync] vision model (UI): {model_name}", flush=True)
+    else:
+        print(
+            "[wiki sync] WARNING: no vision model from UI — "
+            "Foundation Model Parser will use default (Claude 5.0 Sonnet)",
+            flush=True,
+        )
+
     wiki = _wiki_root(user_id)
     os.chdir(wiki)
     out = wiki / "graphify-out"
@@ -1075,11 +1112,25 @@ def run_sync(
     from application import utils as app_utils
 
     use_foundation_model = app_utils.is_foundation_model_parser_enabled(user_id)
+    use_parallel = app_utils.is_wiki_parallel_processing_enabled(user_id)
     if use_foundation_model:
         print(
             "[wiki sync] Foundation Model Parser enabled — PDF→images→LLM",
             flush=True,
         )
+    if use_parallel and use_foundation_model:
+        print(
+            "[wiki sync] Parallel page processing enabled "
+            f"(page_workers={os.environ.get('WIKI_SYNC_PAGE_WORKERS', '4')}, "
+            f"llm_concurrency={os.environ.get('WIKI_SYNC_LLM_CONCURRENCY', '4')})",
+            flush=True,
+        )
+    elif use_foundation_model:
+        print(
+            "[wiki sync] Parallel page processing disabled — sequential pages",
+            flush=True,
+        )
+    if use_foundation_model:
         doc_files = _merge_doc_files_with_resumes(
             doc_files,
             out=out,
@@ -1098,6 +1149,7 @@ def run_sync(
             out=out,
             deep=deep,
             use_foundation_model=use_foundation_model,
+            parallel_pages=use_parallel and use_foundation_model,
         )
 
     merged = _merge_extracts(ast, sem)
@@ -1184,6 +1236,11 @@ def main() -> None:
         help="Corpus path (repeatable). Default: user wiki_sources or wiki/raw",
     )
     parser.add_argument("--deep", action="store_true", help="Aggressive INFERRED edges")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="UI display name for Foundation Model Parser vision model",
+    )
     args = parser.parse_args()
     print(
         f"[wiki sync] start user={args.user} full={args.full} deep={args.deep}",
@@ -1194,6 +1251,7 @@ def main() -> None:
         full=args.full,
         input_paths=args.input,
         deep=args.deep,
+        model=args.model,
     )
     print(
         f"[wiki sync] done status={summary.get('status')} "

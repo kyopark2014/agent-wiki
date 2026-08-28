@@ -683,6 +683,7 @@ export default function App() {
                 onSend={handleSend}
                 onRagUploadComplete={handleRagUploadComplete}
                 onWikiUploadComplete={handleWikiUploadComplete}
+                syncModel={activeTask?.model_name}
               />
             }
           />

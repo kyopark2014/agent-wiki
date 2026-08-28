@@ -692,6 +692,7 @@ _DEFAULT_USER_SETTINGS: dict[str, object] = {
     "knowledge_graph_enabled": True,
     "graph_pattern": DEFAULT_GRAPH_PATTERN,
     "foundation_model_parser_enabled": False,
+    "wiki_parallel_processing_enabled": True,
 }
 
 
@@ -767,6 +768,10 @@ def load_user_settings(user_id: str | None) -> dict[str, object]:
                 settings["foundation_model_parser_enabled"] = bool(
                     raw["foundation_model_parser_enabled"]
                 )
+            if "wiki_parallel_processing_enabled" in raw:
+                settings["wiki_parallel_processing_enabled"] = bool(
+                    raw["wiki_parallel_processing_enabled"]
+                )
             if "skills" in raw:
                 settings["skills"] = _normalize_string_list(raw.get("skills"))
             if "mcp_servers" in raw:
@@ -793,6 +798,8 @@ def save_user_settings(user_id: str | None, **updates: object) -> dict[str, obje
         elif key == "graph_pattern":
             settings[key] = normalize_graph_pattern(value)
         elif key == "foundation_model_parser_enabled":
+            settings[key] = bool(value)
+        elif key == "wiki_parallel_processing_enabled":
             settings[key] = bool(value)
         elif key == "skills":
             settings[key] = _normalize_string_list(value)
@@ -826,6 +833,23 @@ def set_foundation_model_parser_enabled(
         user_id, foundation_model_parser_enabled=bool(enabled)
     )
     return bool(settings.get("foundation_model_parser_enabled", False))
+
+
+def is_wiki_parallel_processing_enabled(user_id: str | None) -> bool:
+    """True when Wiki Sync uses parallel page LLM extraction (default: True)."""
+    return bool(
+        load_user_settings(user_id).get("wiki_parallel_processing_enabled", True)
+    )
+
+
+def set_wiki_parallel_processing_enabled(
+    enabled: bool, *, user_id: str | None
+) -> bool:
+    """Persist Wiki parallel page processing toggle; returns the stored value."""
+    settings = save_user_settings(
+        user_id, wiki_parallel_processing_enabled=bool(enabled)
+    )
+    return bool(settings.get("wiki_parallel_processing_enabled", True))
 
 
 def is_hybrid_graph_search_enabled() -> bool:

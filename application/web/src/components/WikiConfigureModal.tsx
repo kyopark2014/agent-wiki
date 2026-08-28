@@ -34,6 +34,7 @@ export function WikiConfigureModal({ onClose }: Props) {
   const [pendingDocs, setPendingDocs] = useState<File[]>([]);
   const [wikiDir, setWikiDir] = useState("");
   const [foundationModelParser, setFoundationModelParser] = useState(false);
+  const [parallelProcessing, setParallelProcessing] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [addingUrl, setAddingUrl] = useState(false);
@@ -56,6 +57,7 @@ export function WikiConfigureModal({ onClose }: Props) {
         setFoundationModelParser(
           Boolean(data.foundation_model_parser_enabled),
         );
+        setParallelProcessing(data.parallel_processing_enabled !== false);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err));
@@ -105,11 +107,13 @@ export function WikiConfigureModal({ onClose }: Props) {
       const saved = await api.putWikiSources({
         folders,
         foundation_model_parser_enabled: foundationModelParser,
+        parallel_processing_enabled: parallelProcessing,
       });
       setSourceSlots(emptySlots(saved.folders || [], saved.max_sources || SOURCE_SLOTS));
       setFoundationModelParser(
         Boolean(saved.foundation_model_parser_enabled),
       );
+      setParallelProcessing(saved.parallel_processing_enabled !== false);
       if (saved.folders.length > 0) {
         messages.push(`Source ${saved.folders.length}개 저장`);
       } else {
@@ -119,6 +123,11 @@ export function WikiConfigureModal({ onClose }: Props) {
         foundationModelParser
           ? "Foundation Model Parser On"
           : "Foundation Model Parser Off",
+      );
+      messages.push(
+        parallelProcessing
+          ? "Parallel Processing On"
+          : "Parallel Processing Off",
       );
 
       setSuccess(
@@ -223,6 +232,21 @@ export function WikiConfigureModal({ onClose }: Props) {
                 disabled={busy || addingUrl}
                 onChange={(e) => {
                   setFoundationModelParser(e.target.checked);
+                  setSuccess(null);
+                }}
+              />
+            </label>
+
+            <label className="wiki-configure-toggle">
+              <span className="wiki-configure-toggle-title">
+                Parallel Processing
+              </span>
+              <input
+                type="checkbox"
+                checked={parallelProcessing}
+                disabled={busy || addingUrl}
+                onChange={(e) => {
+                  setParallelProcessing(e.target.checked);
                   setSuccess(null);
                 }}
               />

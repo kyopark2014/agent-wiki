@@ -34,6 +34,8 @@ interface Props {
   onSend: (text: string, files?: string[]) => void;
   onRagUploadComplete?: (message: string) => void;
   onWikiUploadComplete?: (message: string) => void;
+  /** Active task model — forwarded to Wiki Sync after raw upload. */
+  syncModel?: string;
 }
 
 const RAG_ACCEPT =
@@ -57,6 +59,7 @@ export function ChatInput({
   onSend,
   onRagUploadComplete,
   onWikiUploadComplete,
+  syncModel,
 }: Props) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -92,7 +95,7 @@ export function ChatInput({
     onDragOver,
     onDragLeave,
     onDrop,
-  } = useFileUpload({ disabled });
+  } = useFileUpload({ disabled, syncModel });
 
   function adjustInputHeight() {
     const el = textareaRef.current;

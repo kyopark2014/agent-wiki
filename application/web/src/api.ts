@@ -117,7 +117,10 @@ export interface WikiStatus {
     page?: number | null;
     page_n?: number | null;
     pct?: number | null;
+    aggregated?: boolean | null;
   } | null;
+  foundation_model_parser_enabled?: boolean;
+  parallel_processing_enabled?: boolean;
 }
 
 export interface WikiSourcesConfig {
@@ -126,6 +129,7 @@ export interface WikiSourcesConfig {
   urls: string[];
   max_sources: number;
   foundation_model_parser_enabled?: boolean;
+  parallel_processing_enabled?: boolean;
 }
 
 export interface WikiUrlIngestResult {
@@ -204,10 +208,15 @@ export const api = {
       method: "POST",
     }),
   getWikiStatus: () => request<WikiStatus>("/api/wiki/status"),
-  syncWiki: (full = false) =>
-    request<WikiStatus>(`/api/wiki/sync${full ? "?full=1" : ""}`, {
+  syncWiki: (full = false, model?: string) => {
+    const params = new URLSearchParams();
+    if (full) params.set("full", "1");
+    if (model?.trim()) params.set("model", model.trim());
+    const qs = params.toString();
+    return request<WikiStatus>(`/api/wiki/sync${qs ? `?${qs}` : ""}`, {
       method: "POST",
-    }),
+    });
+  },
   setWikiGraphPattern: (pattern: GraphPattern | string) =>
     request<WikiStatus>("/api/wiki/pattern", {
       method: "PATCH",
@@ -217,6 +226,7 @@ export const api = {
   putWikiSources: (body: {
     folders: string[];
     foundation_model_parser_enabled?: boolean;
+    parallel_processing_enabled?: boolean;
   }) =>
     request<WikiSourcesConfig>("/api/wiki/sources", {
       method: "PUT",

@@ -19,6 +19,10 @@ from application.wiki_jobs import (
 )
 from application import utils
 
+import logging
+
+logger = logging.getLogger("routes_wiki")
+
 router = APIRouter(prefix="/api/wiki", tags=["wiki"])
 
 # Multipart /api/wiki/raw still caps at ~ALB body size; prefer /raw/presign for large files.
@@ -48,6 +52,7 @@ class WikiPatternPatch(BaseModel):
 class WikiSourcesPut(BaseModel):
     folders: list[str] = Field(default_factory=list, max_length=3)
     foundation_model_parser_enabled: bool | None = None
+    parallel_processing_enabled: bool | None = None
 
 
 class WikiUrlIngest(BaseModel):
@@ -105,6 +110,10 @@ def wiki_status(request: Request) -> dict:
         "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
             user_id
         ),
+        "parallel_processing_enabled": utils.is_wiki_parallel_processing_enabled(
+            user_id
+        ),
+        "vision_model": job.get("vision_model"),
         "error": job.get("error"),
         "message": job.get("message"),
         "last_success_at": job.get("last_success_at"),
@@ -123,6 +132,9 @@ def get_wiki_sources(request: Request) -> dict:
         "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
             user_id
         ),
+        "parallel_processing_enabled": utils.is_wiki_parallel_processing_enabled(
+            user_id
+        ),
     }
 
 
@@ -139,6 +151,11 @@ def put_wiki_sources(body: WikiSourcesPut, request: Request) -> dict:
                 bool(body.foundation_model_parser_enabled),
                 user_id=user_id,
             )
+        if body.parallel_processing_enabled is not None:
+            utils.set_wiki_parallel_processing_enabled(
+                bool(body.parallel_processing_enabled),
+                user_id=user_id,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -152,6 +169,9 @@ def put_wiki_sources(body: WikiSourcesPut, request: Request) -> dict:
         "urls": saved["urls"],
         "max_sources": utils.MAX_WIKI_SOURCE_FOLDERS,
         "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
+            user_id
+        ),
+        "parallel_processing_enabled": utils.is_wiki_parallel_processing_enabled(
             user_id
         ),
     }
@@ -318,11 +338,26 @@ async def upload_wiki_raw_files(
 
 
 @router.post("/sync")
-def sync_wiki(request: Request, full: bool = Query(False)) -> dict:
-    """Enqueue graphify sync for the user's wiki directory."""
+def sync_wiki(
+    request: Request,
+    full: bool = Query(False),
+    model: str | None = Query(None),
+) -> dict:
+    """Enqueue graphify sync for the user's wiki directory.
+
+    ``model`` is the UI-selected display name (e.g. ``Claude 4.6 Sonnet``)
+    used by Foundation Model Parser vision extraction.
+    """
     user_id = require_user_id(request)
     utils.ensure_user_wiki_dir(user_id)
-    job = ensure_wiki_sync(user_id, full=full)
+    model_name = (model or "").strip() or None
+    logger.info(
+        "wiki sync requested user=%s full=%s model=%s",
+        user_id,
+        full,
+        model_name or "(default)",
+    )
+    job = ensure_wiki_sync(user_id, full=full, model=model)
     path = wiki_graph_html_path(user_id)
     return {
         "wiki_dir": utils.get_user_wiki_dir(user_id),
@@ -330,6 +365,12 @@ def sync_wiki(request: Request, full: bool = Query(False)) -> dict:
         "path": path.name if path.is_file() else None,
         "storage": str(path.parent),
         "pattern": utils.get_wiki_graph_pattern(user_id),
+        "foundation_model_parser_enabled": utils.is_foundation_model_parser_enabled(
+            user_id
+        ),
+        "parallel_processing_enabled": utils.is_wiki_parallel_processing_enabled(
+            user_id
+        ),
         **job,
     }
 

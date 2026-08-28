@@ -107,6 +107,7 @@ export function Sidebar({
     page?: number | null;
     page_n?: number | null;
     pct?: number | null;
+    aggregated?: boolean | null;
   } | null>(null);
   const [wikiSyncPopupOpen, setWikiSyncPopupOpen] = useState(false);
   const [knowledgeSyncBusy, setKnowledgeSyncBusy] = useState(false);
@@ -180,7 +181,7 @@ export function Sidebar({
     setWikiSyncBusy(true);
     setWikiSyncMessage("Wiki 동기화를 시작합니다…");
     try {
-      const result = await api.syncWiki(false);
+      const result = await api.syncWiki(false, modelName || undefined);
       const status = result.status;
       if (status === "error") {
         setWikiSyncBusy(false);
