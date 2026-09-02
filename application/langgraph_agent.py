@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import re
 import sys
 import traceback
 try:
@@ -682,16 +684,43 @@ MAX_CONTEXT_TURNS = 5
 # Bedrock Anthropic/Nova prompt caching (ephemeral, 5m TTL).
 PROMPT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "5m"}
 
+# Mantle GPT 5.6+ explicit prompt caching (Responses API, 30m TTL).
+GPT_PROMPT_CACHE_OPTIONS = {"mode": "explicit", "ttl": "30m"}
 
-def _supports_prompt_caching(model_type: str | None) -> bool:
-    # Bedrock-specific cache_control; skip when routing via LiteLLM gateway.
-    if getattr(chat, "llm_gateway_enabled", False):
+
+def _bedrock_cache_disabled() -> bool:
+    return bool(getattr(chat, "llm_gateway_enabled", False))
+
+
+def _supports_bedrock_prompt_caching(model_type: str | None) -> bool:
+    if _bedrock_cache_disabled():
         return False
     return model_type in ("claude", "nova")
 
 
-def _system_message_with_cache(system: str) -> SystemMessage:
-    """Build a SystemMessage with an Anthropic-style cache breakpoint."""
+def _supports_gpt_explicit_caching(model_type: str | None, model_id: str | None) -> bool:
+    if _bedrock_cache_disabled():
+        return False
+    if model_type != "openai":
+        return False
+    mid = (model_id or "").lower()
+    match = re.search(r"openai\.gpt-(\d+)\.(\d+)", mid)
+    if not match:
+        return False
+    major, minor = int(match.group(1)), int(match.group(2))
+    return (major, minor) >= (5, 6)
+
+
+def _gpt_prompt_cache_key(config: dict, tools: list | None) -> str:
+    cfg = config.get("configurable") or {}
+    thread_id = cfg.get("thread_id") or "default"
+    tool_names = sorted(getattr(t, "name", str(t)) for t in (tools or []))
+    tools_digest = hashlib.sha256(",".join(tool_names).encode()).hexdigest()[:12]
+    project = config.get("projectName") or utils.load_config().get("projectName") or "default"
+    return f"{project}:{thread_id}:{tools_digest}"
+
+
+def _system_message_with_bedrock_cache(system: str) -> SystemMessage:
     return SystemMessage(
         content=[
             {
@@ -701,6 +730,25 @@ def _system_message_with_cache(system: str) -> SystemMessage:
             }
         ]
     )
+
+
+def _system_message_with_gpt_cache(system: str) -> SystemMessage:
+    return SystemMessage(
+        content=[
+            {
+                "type": "text",
+                "text": system,
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        ]
+    )
+
+
+_system_message_with_cache = _system_message_with_bedrock_cache
+
+
+def _supports_prompt_caching(model_type: str | None) -> bool:
+    return _supports_bedrock_prompt_caching(model_type)
 
 
 def _log_prompt_cache_usage(response: AIMessage) -> None:
@@ -751,10 +799,15 @@ async def call_model(state: State, config):
     chatModel = chat.get_chat()
 
     model = chatModel.bind_tools(tools) if tools else chatModel
-    use_prompt_cache = _supports_prompt_caching(active_model_type)
-    if use_prompt_cache:
-        # ChatBedrock: marks last message; ChatBedrockConverse: system+tools+last.
+    use_bedrock_cache = _supports_bedrock_prompt_caching(active_model_type)
+    use_gpt_cache = _supports_gpt_explicit_caching(active_model_type, active_model_id)
+    if use_bedrock_cache:
         model = model.bind(cache_control=PROMPT_CACHE_CONTROL)
+    elif use_gpt_cache:
+        model = model.bind(
+            prompt_cache_key=_gpt_prompt_cache_key(config, tools),
+            prompt_cache_options=GPT_PROMPT_CACHE_OPTIONS,
+        )
 
     try:
         raw = state["messages"]
@@ -807,8 +860,10 @@ async def call_model(state: State, config):
         ):
             messages = chat.sanitize_adaptive_thinking_messages(messages)
 
-        if use_prompt_cache:
-            system_msg = _system_message_with_cache(system)
+        if use_bedrock_cache:
+            system_msg = _system_message_with_bedrock_cache(system)
+        elif use_gpt_cache:
+            system_msg = _system_message_with_gpt_cache(system)
         else:
             system_msg = SystemMessage(content=system)
         model_messages = [system_msg, *messages]
