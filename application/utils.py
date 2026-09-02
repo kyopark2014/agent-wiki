@@ -4,6 +4,8 @@ import json
 import traceback
 import boto3
 import os
+from pathlib import Path
+from typing import Any
 from contextlib import contextmanager
 from urllib import parse
 from botocore.exceptions import ClientError
@@ -202,6 +204,58 @@ def wiki_graph_html_path(user_id: str | None = None) -> str:
 
 def wiki_graph_json_path(user_id: str | None = None) -> str:
     return os.path.join(wiki_graphify_out_dir(user_id), "graph.json")
+
+
+WIKI_SYNC_STATUS_FILENAME = ".wiki_sync_status.json"
+
+
+def wiki_sync_status_path(user_id: str | None = None) -> str:
+    return os.path.join(wiki_graphify_out_dir(user_id), WIKI_SYNC_STATUS_FILENAME)
+
+
+def load_wiki_sync_status(user_id: str | None = None) -> dict[str, Any] | None:
+    """Load ``.wiki_sync_status.json`` persisted by wiki_jobs."""
+    path = wiki_sync_status_path(user_id)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def wiki_recall_blocked_message(
+    user_id: str | None, graph_json_path: str | os.PathLike[str]
+) -> str | None:
+    """Return a user-facing error when ``recall_wiki`` should not run yet."""
+    graph_json = Path(graph_json_path)
+    status_doc = load_wiki_sync_status(user_id)
+    if status_doc:
+        st = str(status_doc.get("status") or "").strip().lower()
+        if st in ("queued", "running"):
+            msg = str(status_doc.get("message") or "").strip()
+            base = msg or "Wiki 동기화가 진행 중입니다."
+            return (
+                f"{base} 완료 후(보통 1–3분) 다시 검색해 주세요. "
+                "Settings → Wiki → Graph에서 진행 상태를 확인할 수 있습니다."
+            )
+        if st == "error" and not graph_json.is_file():
+            err = str(
+                status_doc.get("error") or status_doc.get("message") or "알 수 없는 오류"
+            ).strip()
+            return (
+                f"Wiki 동기화에 실패했습니다: {err}. "
+                "Settings → Wiki → Sync를 다시 실행하세요."
+            )
+
+    if not graph_json.is_file():
+        return (
+            "Wiki 그래프가 아직 없습니다. Settings → Wiki → Sync를 실행한 뒤 "
+            "동기화가 완료되면 다시 검색하세요."
+        )
+    return None
 
 
 def wiki_graph_pattern_path(user_id: str | None = None) -> str:
@@ -1758,11 +1812,13 @@ def generate_rag_upload_presigned_put(
 
 
 def _s3_client_for_presign():
-    """S3 client for browser-safe regional, virtual-hostedpresigned URLs.
+    """S3 client for browser-safe regional, virtual-hosted presigned URLs.
 
     Global ``*.s3.amazonaws.com`` hosts often 307-redirect to the region
-    endpoint; browsers then fail the signed PUT (403/CORS). Prefer virtual-hosted
-    ``https://{bucket}.s3.{region}.amazonaws.com/...``.
+    endpoint; browsers then fail the signed PUT (403/CORS) and our API never
+    sees ``/complete``. Prefer virtual-hosted
+    ``https://{bucket}.s3.{region}.amazonaws.com/...`` via SigV4 + regional
+    endpoint so the browser PUT never follows a TemporaryRedirect.
     """
     from botocore.config import Config
 
@@ -1770,6 +1826,7 @@ def _s3_client_for_presign():
     return boto3.client(
         service_name="s3",
         region_name=region,
+        endpoint_url=f"https://s3.{region}.amazonaws.com",
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "virtual"},

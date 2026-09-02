@@ -119,10 +119,9 @@ def recall_wiki(
         return _error("question is required")
 
     graph_json = Path(utils.wiki_graph_json_path(user_id))
-    if not graph_json.is_file():
-        return _error(
-            "Wiki 그래프가 아직 없습니다. Settings → Wiki → Sync를 실행한 뒤 다시 검색하세요."
-        )
+    blocked = utils.wiki_recall_blocked_message(user_id, graph_json)
+    if blocked:
+        return _error(blocked)
 
     wiki_root = Path(utils.get_user_wiki_dir(user_id))
     allowed = [wiki_root, wiki_root / "raw", wiki_root / "graphify-out"]
