@@ -20,13 +20,14 @@ GPT 5.6+는 Mantle Responses API(`mantle_api: "responses"`)에서 explicit cachi
 
 ### 적용 방식
 
-1. **SystemMessage cache breakpoint** — system 텍스트를 content block으로 보내고 `cache_control: ephemeral`을 붙입니다.
-2. **`model.bind(cache_control=...)`** — last message에 cache marker를 추가합니다. `ChatBedrockConverse`(Guardrail 경로)는 system + tools + last message에 `cachePoint`를 자동 삽입합니다.
+1. **Plain SystemMessage** — system에 Anthropic-format `cache_control`을 붙이지 **않습니다**.
+   (`ChatBedrock`가 system의 `ttl`을 제거하고 `5m` 기본값으로 두면, last-message `1h`와 충돌해 `ValidationException`이 납니다.)
+2. **`model.bind(cache_control=PROMPT_CACHE_CONTROL)`** — TTL **`1h`** 로 last-message(및 Converse의 tools/system) breakpoint를 맞춥니다.
 3. **관측** — 응답 `usage_metadata.input_token_details`의 `cache_read` / `cache_creation`을 로그합니다.
 
 ```python
-# runtime_agent/langgraph/langgraph_agent.py
-PROMPT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "5m"}
+# langgraph_agent.py
+PROMPT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 
 
 def _supports_bedrock_prompt_caching(model_type: str | None) -> bool:
@@ -34,15 +35,8 @@ def _supports_bedrock_prompt_caching(model_type: str | None) -> bool:
 
 
 def _system_message_with_bedrock_cache(system: str) -> SystemMessage:
-    return SystemMessage(
-        content=[
-            {
-                "type": "text",
-                "text": system,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-    )
+    # No embedded cache_control — bind() alone owns the 1h breakpoint(s).
+    return SystemMessage(content=system)
 ```
 
 `call_model`에서의 사용:
@@ -56,12 +50,12 @@ if use_bedrock_cache:
 
 | Wrapper | cache 동작 |
 |---------|------------|
-| `ChatBedrock` (기본 Claude, Guardrail 없음) | system content block + last message `cache_control` → prefix(system/tools 포함) 캐시 |
-| `ChatBedrockConverse` (Guardrail 활성) | `cache_control` bind 시 system / tools / last message에 `cachePoint` 삽입 |
+| `ChatBedrock` (기본 Claude, Guardrail 없음) | last message `cache_control` ttl=`1h` → prefix(system/tools 포함) 캐시 |
+| `ChatBedrockConverse` (Guardrail 활성) | `bind` 시 system / tools / last message에 `cachePoint` ttl=`1h` 삽입 |
 
 ### 특성
 
-- TTL: **5분** (`ephemeral`)
+- TTL: **1시간** (`ephemeral`, tools/system/messages 동일)
 - 최소 prefix: 모델별 512~4,096 tokens (대부분 skill XML + tool schema는 임계치 초과)
 - tool loop **2번째 LLM 호출부터** `cache_read` 발생이 일반적
 - 스트리밍 usage 파싱: [`bedrock_stream_usage_patch.py`](./runtime_agent/langgraph/bedrock_stream_usage_patch.py)
