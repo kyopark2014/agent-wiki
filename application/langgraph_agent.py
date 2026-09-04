@@ -681,8 +681,8 @@ BASE_SYSTEM_PROMPT = (
 
 MAX_CONTEXT_TURNS = 5
 
-# Bedrock Anthropic/Nova prompt caching (ephemeral, 5m TTL).
-PROMPT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "5m"}
+# Bedrock Anthropic/Nova prompt caching (ephemeral, 1h TTL).
+PROMPT_CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 
 # Mantle GPT 5.6+ explicit prompt caching (Responses API, 30m TTL).
 GPT_PROMPT_CACHE_OPTIONS = {"mode": "explicit", "ttl": "30m"}
@@ -726,7 +726,7 @@ def _system_message_with_bedrock_cache(system: str) -> SystemMessage:
             {
                 "type": "text",
                 "text": system,
-                "cache_control": {"type": "ephemeral"},
+                "cache_control": dict(PROMPT_CACHE_CONTROL),  # same ttl as last-message breakpoint
             }
         ]
     )
