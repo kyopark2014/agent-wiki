@@ -808,6 +808,7 @@ def _run_semantic(
     deep: bool,
     use_foundation_model: bool = False,
     parallel_pages: bool = True,
+    model: str | None = None,
 ) -> dict[str, Any]:
     from lib.semantic import extract_corpus  # type: ignore
 
@@ -822,6 +823,7 @@ def _run_semantic(
 
     stage = _wiki_converted_dir(out)
     stage.mkdir(parents=True, exist_ok=True)
+    llm_model = (model or "").strip() or None
     try:
         mode = "foundation-model" if use_foundation_model else "pdfplumber/pypdf"
         print(
@@ -849,10 +851,13 @@ def _run_semantic(
 
         print(
             f"[wiki sync] semantic extract on {len(staged_mds)} markdown chunk(s) "
-            f"in {stage}",
+            f"in {stage}"
+            + (f" · model={llm_model}" if llm_model else ""),
             flush=True,
         )
-        result = extract_corpus(stage, out, deep=deep, chunk_size=8)
+        result = extract_corpus(
+            stage, out, deep=deep, chunk_size=8, model=llm_model
+        )
         result = _rewrite_extract_sources(result, path_map)
     except Exception:
         # Keep converted/ for debugging on failure.
@@ -985,12 +990,15 @@ def run_sync(
     """Run graphify sync for a user's wiki folder. Returns a status summary."""
     model_name = (model or "").strip()
     if model_name:
+        # Vision (PDF→images→LLM) and semantic extract both honor the UI model.
         os.environ["WIKI_VISION_MODEL"] = model_name
-        print(f"[wiki sync] vision model (UI): {model_name}", flush=True)
+        os.environ["GRAPHIFY_LLM_MODEL"] = model_name
+        print(f"[wiki sync] LLM model (UI): {model_name}", flush=True)
     else:
         print(
-            "[wiki sync] WARNING: no vision model from UI — "
-            "Foundation Model Parser will use default (Claude 5.0 Sonnet)",
+            "[wiki sync] WARNING: no model from UI — "
+            "vision defaults to Claude 5.0 Sonnet; "
+            "semantic extract uses GRAPHIFY_LLM_MODEL / .env",
             flush=True,
         )
 
@@ -1152,6 +1160,7 @@ def run_sync(
             deep=deep,
             use_foundation_model=use_foundation_model,
             parallel_pages=use_parallel and use_foundation_model,
+            model=model_name or None,
         )
 
     merged = _merge_extracts(ast, sem)
@@ -1241,7 +1250,7 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="UI display name for Foundation Model Parser vision model",
+        help="UI display name for vision + semantic LLM (same as chat model)",
     )
     args = parser.parse_args()
     print(

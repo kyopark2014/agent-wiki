@@ -89,6 +89,17 @@ def resolve_bedrock_model_id(model: str) -> str:
     for key, value in _BEDROCK_MODEL_IDS.items():
         if key.lower() == lower:
             return value
+    # Fall back to application/info.py (same catalog as chat / vision).
+    try:
+        import info  # type: ignore
+
+        profiles = info.get_model_info(raw) or info.get_model_info(gateway_id)
+        if profiles:
+            mid = (profiles[0].get("model_id") or "").strip()
+            if mid:
+                return mid
+    except Exception:
+        pass
     raise SystemExit(
         f"No Bedrock model mapping for '{raw}'.\n"
         "Set GRAPHIFY_BEDROCK_MODEL to a full Bedrock id "

@@ -395,6 +395,7 @@ def _run_sync(user_id: str, full: bool, model: str | None = None) -> None:
         env["PYTHONUNBUFFERED"] = "1"
         if model_name:
             env["WIKI_VISION_MODEL"] = model_name
+            env["GRAPHIFY_LLM_MODEL"] = model_name
         logger.info("+ %s (detached)", " ".join(cmd))
 
         popen_kwargs: dict[str, Any] = {

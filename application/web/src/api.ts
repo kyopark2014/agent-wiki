@@ -121,6 +121,7 @@ export interface WikiStatus {
   } | null;
   foundation_model_parser_enabled?: boolean;
   parallel_processing_enabled?: boolean;
+  vision_model?: string | null;
 }
 
 export interface WikiSourcesConfig {

@@ -346,7 +346,7 @@ def sync_wiki(
     """Enqueue graphify sync for the user's wiki directory.
 
     ``model`` is the UI-selected display name (e.g. ``Claude 4.6 Sonnet``)
-    used by Foundation Model Parser vision extraction.
+    used for Foundation Model Parser vision and semantic graph extraction.
     """
     user_id = require_user_id(request)
     utils.ensure_user_wiki_dir(user_id)
