@@ -809,6 +809,7 @@ def _run_semantic(
     use_foundation_model: bool = False,
     parallel_pages: bool = True,
     model: str | None = None,
+    parallel_chunks: bool = True,
 ) -> dict[str, Any]:
     from lib.semantic import extract_corpus  # type: ignore
 
@@ -852,11 +853,21 @@ def _run_semantic(
         print(
             f"[wiki sync] semantic extract on {len(staged_mds)} markdown chunk(s) "
             f"in {stage}"
-            + (f" · model={llm_model}" if llm_model else ""),
+            + (f" · model={llm_model}" if llm_model else "")
+            + (
+                f" · parallel_chunks={os.environ.get('WIKI_SYNC_SEMANTIC_WORKERS', '4')}"
+                if parallel_chunks
+                else " · parallel_chunks=off"
+            ),
             flush=True,
         )
         result = extract_corpus(
-            stage, out, deep=deep, chunk_size=8, model=llm_model
+            stage,
+            out,
+            deep=deep,
+            chunk_size=8,
+            model=llm_model,
+            parallel=parallel_chunks,
         )
         result = _rewrite_extract_sources(result, path_map)
     except Exception:
@@ -1140,6 +1151,17 @@ def run_sync(
             "[wiki sync] Parallel page processing disabled — sequential pages",
             flush=True,
         )
+    if use_parallel:
+        print(
+            "[wiki sync] Parallel semantic chunk extract enabled "
+            f"(semantic_workers={os.environ.get('WIKI_SYNC_SEMANTIC_WORKERS', '4')})",
+            flush=True,
+        )
+    else:
+        print(
+            "[wiki sync] Parallel semantic chunk extract disabled — sequential chunks",
+            flush=True,
+        )
     if use_foundation_model:
         doc_files = _merge_doc_files_with_resumes(
             doc_files,
@@ -1161,6 +1183,7 @@ def run_sync(
             use_foundation_model=use_foundation_model,
             parallel_pages=use_parallel and use_foundation_model,
             model=model_name or None,
+            parallel_chunks=use_parallel,
         )
 
     merged = _merge_extracts(ast, sem)

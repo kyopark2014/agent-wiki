@@ -44,6 +44,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Max corpus files")
     parser.add_argument("--deep", action="store_true", help="Aggressive INFERRED edges")
     parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel semantic chunk LLM calls",
+    )
+    parser.add_argument(
         "--from-queue",
         action="store_true",
         help="Only extract files listed in out/.extract_queue.json (incremental)",
@@ -53,6 +58,7 @@ def main() -> None:
     corpus = (args.corpus or corpus_dir()).expanduser().resolve()
     # Prefer GRAPHIFY_OUT_DIR (session out/ when --user pipeline configured it).
     artifact = (args.work or graphify_out_dir()).expanduser().resolve()
+    parallel = not args.no_parallel
 
     if args.from_queue:
         extraction = extract_from_queue(
@@ -61,6 +67,7 @@ def main() -> None:
             deep=args.deep,
             chunk_size=args.chunk_size,
             model=args.model,
+            parallel=parallel,
         )
     else:
         extraction = extract_corpus(
@@ -70,6 +77,7 @@ def main() -> None:
             chunk_size=args.chunk_size,
             limit=args.limit,
             model=args.model,
+            parallel=parallel,
         )
     graph_json = build_and_export(extraction, artifact, corpus_label=str(corpus))
     print()

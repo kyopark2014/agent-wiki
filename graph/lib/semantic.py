@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from lib.config import bedrock_settings, llm_gateway_settings
 from lib.llm import chat_json, default_model, resolve_bedrock_model_id
@@ -43,6 +46,7 @@ def _rel_path(path: Path, root: Path) -> str:
         return str(path)
 
 
+
 def _is_corpus_md(path: Path, corpus_dir: Path) -> bool:
     """True for staged corpus markdown; excludes PDF foundation work dirs.
 
@@ -70,6 +74,104 @@ def chunk_files(files: list[Path], *, chunk_size: int = 8) -> list[list[Path]]:
     """Smaller chunks than skill (20-25) to fit API context with full file bodies."""
     files = sorted(files, key=lambda p: (str(p.parent), p.name))
     return [files[i : i + chunk_size] for i in range(0, len(files), chunk_size)]
+
+
+def _semantic_workers() -> int:
+    """Max concurrent semantic LLM chunk jobs (``WIKI_SYNC_SEMANTIC_WORKERS``)."""
+    raw = (os.environ.get("WIKI_SYNC_SEMANTIC_WORKERS") or "4").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 4
+
+
+_CACHE_LOCK = threading.Lock()
+
+
+def _extract_chunks(
+    chunks: list[list[Path]],
+    *,
+    corpus_root: Path,
+    deep: bool,
+    model: str | None,
+    artifact_dir: Path,
+    save_semantic_cache: Callable[..., int],
+    parallel: bool = True,
+    on_error: Callable[[int, list[Path], BaseException], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Run ``extract_chunk`` over all chunks, optionally in parallel."""
+    total = len(chunks)
+    if total == 0:
+        return []
+
+    workers = min(_semantic_workers(), total) if parallel else 1
+    if workers > 1:
+        print(
+            f"  parallel semantic extract: {total} chunk(s), workers={workers}",
+            flush=True,
+        )
+
+    def _one(index: int, chunk: list[Path]) -> tuple[int, dict[str, Any] | None, BaseException | None]:
+        names = ", ".join(p.name for p in chunk)
+        print(
+            f"  [{index}/{total}] extracting {len(chunk)} file(s): {names[:80]}…",
+            flush=True,
+        )
+        try:
+            part = extract_chunk(
+                chunk,
+                corpus_root=corpus_root,
+                chunk_num=index,
+                total_chunks=total,
+                deep=deep,
+                model=model,
+            )
+            with _CACHE_LOCK:
+                save_semantic_cache(
+                    part.get("nodes") or [],
+                    part.get("edges") or [],
+                    part.get("hyperedges") or [],
+                    root=artifact_dir,
+                )
+            return index, part, None
+        except BaseException as exc:  # noqa: BLE001
+            return index, None, exc
+
+    parts_by_index: dict[int, dict[str, Any]] = {}
+    if workers <= 1:
+        for i, chunk in enumerate(chunks, 1):
+            index, part, exc = _one(i, chunk)
+            if exc is not None:
+                print(f"  WARNING: chunk {index} failed: {exc}", flush=True)
+                if on_error is not None:
+                    on_error(index, chunk, exc)
+                continue
+            if part is not None:
+                parts_by_index[index] = part
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_one, i, chunk): (i, chunk)
+                for i, chunk in enumerate(chunks, 1)
+            }
+            for fut in as_completed(futures):
+                index, chunk = futures[fut]
+                try:
+                    idx, part, exc = fut.result()
+                except BaseException as exc:  # noqa: BLE001
+                    print(f"  WARNING: chunk {index} failed: {exc}", flush=True)
+                    if on_error is not None:
+                        on_error(index, chunk, exc)
+                    continue
+                if exc is not None:
+                    print(f"  WARNING: chunk {idx} failed: {exc}", flush=True)
+                    if on_error is not None:
+                        on_error(idx, chunk, exc)
+                    continue
+                if part is not None:
+                    parts_by_index[idx] = part
+
+    return [parts_by_index[i] for i in sorted(parts_by_index)]
 
 
 def extract_chunk(
@@ -236,6 +338,7 @@ def extract_from_queue(
     deep: bool = False,
     chunk_size: int = 8,
     model: str | None = None,
+    parallel: bool = True,
 ) -> dict[str, Any]:
     """LLM-extract only queued corpus files and merge into existing extract JSON."""
     import graphify.cache as gc
@@ -274,6 +377,7 @@ def extract_from_queue(
             deep=deep,
             chunk_size=chunk_size,
             model=model,
+            parallel=parallel,
         )
 
     claimed = claim_pending(artifact_dir)
@@ -306,39 +410,32 @@ def extract_from_queue(
         model = model or default_model()
         _log_llm_model(model)
 
-        new_parts: list[dict[str, Any]] = []
         uncached_paths = [Path(p) for p in uncached]
         chunks = chunk_files(uncached_paths, chunk_size=chunk_size)
         failed_paths: set[str] = set()
-        for i, chunk in enumerate(chunks, 1):
-            names = ", ".join(p.name for p in chunk)
-            print(f"  [{i}/{len(chunks)}] extracting {len(chunk)} file(s): {names[:80]}…")
-            try:
-                part = extract_chunk(
-                    chunk,
-                    corpus_root=corpus_dir,
-                    chunk_num=i,
-                    total_chunks=len(chunks),
-                    deep=deep,
-                    model=model,
-                )
-                new_parts.append(part)
-                save_semantic_cache(
-                    part.get("nodes") or [],
-                    part.get("edges") or [],
-                    part.get("hyperedges") or [],
-                    root=artifact_dir,
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"  WARNING: chunk {i} failed: {exc}")
-                chunk_items = [
-                    item
-                    for item in claimed
-                    if str(Path(item.get("corpus_path") or "").resolve())
-                    in {str(p.resolve()) for p in chunk}
-                ]
+        fail_lock = threading.Lock()
+
+        def _on_error(_index: int, chunk: list[Path], exc: BaseException) -> None:
+            chunk_items = [
+                item
+                for item in claimed
+                if str(Path(item.get("corpus_path") or "").resolve())
+                in {str(p.resolve()) for p in chunk}
+            ]
+            with fail_lock:
                 fail_items(artifact_dir, chunk_items, error=str(exc))
                 failed_paths.update(str(p.resolve()) for p in chunk)
+
+        new_parts = _extract_chunks(
+            chunks,
+            corpus_root=corpus_dir,
+            deep=deep,
+            model=model,
+            artifact_dir=artifact_dir,
+            save_semantic_cache=save_semantic_cache,
+            parallel=parallel,
+            on_error=_on_error,
+        )
 
         merged_new = (
             _dedupe_merge(new_parts)
@@ -444,11 +541,15 @@ def extract_corpus(
     chunk_size: int = 8,
     limit: int | None = None,
     model: str | None = None,
+    parallel: bool = True,
 ) -> dict[str, Any]:
     """Extract semantic graph from corpus/*.md using LiteLLM + optional file cache.
 
     ``artifact_dir`` receives ``.graphify_extract.json`` and ``cache/`` (shared
     with publish output when using session storage ``out/``).
+
+    When ``parallel`` is True (default), LLM chunks run concurrently up to
+    ``WIKI_SYNC_SEMANTIC_WORKERS`` (default 4).
     """
     import graphify.cache as gc
     from graphify.cache import check_semantic_cache, save_semantic_cache
@@ -480,30 +581,17 @@ def extract_corpus(
         model = model or default_model()
         _log_llm_model(model)
 
-        new_parts: list[dict[str, Any]] = []
         uncached_paths = [Path(p) for p in uncached]
         chunks = chunk_files(uncached_paths, chunk_size=chunk_size)
-        for i, chunk in enumerate(chunks, 1):
-            names = ", ".join(p.name for p in chunk)
-            print(f"  [{i}/{len(chunks)}] extracting {len(chunk)} file(s): {names[:80]}…")
-            try:
-                part = extract_chunk(
-                    chunk,
-                    corpus_root=corpus_dir,
-                    chunk_num=i,
-                    total_chunks=len(chunks),
-                    deep=deep,
-                    model=model,
-                )
-                new_parts.append(part)
-                save_semantic_cache(
-                    part.get("nodes") or [],
-                    part.get("edges") or [],
-                    part.get("hyperedges") or [],
-                    root=artifact_dir,
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(f"  WARNING: chunk {i} failed: {exc}")
+        new_parts = _extract_chunks(
+            chunks,
+            corpus_root=corpus_dir,
+            deep=deep,
+            model=model,
+            artifact_dir=artifact_dir,
+            save_semantic_cache=save_semantic_cache,
+            parallel=parallel,
+        )
 
         merged_new = _dedupe_merge(new_parts) if new_parts else {
             "nodes": [],

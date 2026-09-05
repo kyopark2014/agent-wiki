@@ -890,7 +890,7 @@ def set_foundation_model_parser_enabled(
 
 
 def is_wiki_parallel_processing_enabled(user_id: str | None) -> bool:
-    """True when Wiki Sync uses parallel page LLM extraction (default: True)."""
+    """True when Wiki Sync uses parallel page + semantic chunk LLM calls (default: True)."""
     return bool(
         load_user_settings(user_id).get("wiki_parallel_processing_enabled", True)
     )
@@ -899,7 +899,7 @@ def is_wiki_parallel_processing_enabled(user_id: str | None) -> bool:
 def set_wiki_parallel_processing_enabled(
     enabled: bool, *, user_id: str | None
 ) -> bool:
-    """Persist Wiki parallel page processing toggle; returns the stored value."""
+    """Persist Wiki parallel page/semantic processing toggle; returns the stored value."""
     settings = save_user_settings(
         user_id, wiki_parallel_processing_enabled=bool(enabled)
     )
