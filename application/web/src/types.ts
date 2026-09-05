@@ -17,6 +17,10 @@ export interface Task {
 export interface ToolEvent {
   type: "text" | "tool" | "tool_result" | "info";
   tool?: string;
+  /** MCP server name when the tool belongs to a selected MCP server. */
+  mcpServer?: string;
+  /** Skill name when the tool is get_skill_instructions. */
+  skillName?: string;
   input?: unknown;
   toolUseId?: string;
   data?: string;
