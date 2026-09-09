@@ -763,6 +763,8 @@ def _supports_gpt_explicit_caching(model_type: str | None, model_id: str | None)
     if model_type != "openai":
         return False
     mid = (model_id or "").lower()
+    if mid.startswith("us.openai.") or mid.startswith("global.openai."):
+        return False
     match = re.search(r"openai\.gpt-(\d+)\.(\d+)", mid)
     if not match:
         return False
