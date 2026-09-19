@@ -16,7 +16,6 @@ interface Props {
   busy: boolean;
   message: string | null;
   progress?: SyncProgressInfo | null;
-  modelName?: string | null;
   onClose: () => void;
 }
 
@@ -25,7 +24,6 @@ export function SyncProgressModal({
   busy,
   message,
   progress,
-  modelName,
   onClose,
 }: Props) {
   useEffect(() => {
@@ -115,12 +113,6 @@ export function SyncProgressModal({
           {fileName && (
             <p className="sync-progress-file" title={fileName}>
               {fileName}
-            </p>
-          )}
-
-          {modelName?.trim() && (
-            <p className="sync-progress-model" title={modelName}>
-              모델 · {modelName.trim()}
             </p>
           )}
 

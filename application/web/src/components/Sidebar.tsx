@@ -117,10 +117,6 @@ export function Sidebar({
   } | null>(null);
   const [wikiSyncPopupOpen, setWikiSyncPopupOpen] = useState(false);
   const [wikiSyncTitle, setWikiSyncTitle] = useState("Wiki Sync");
-  const [wikiSyncModel, setWikiSyncModel] = useState<string | null>(null);
-  const [wikiSyncPending, setWikiSyncPending] = useState<"Sync" | "Rebuild" | null>(
-    null,
-  );
   const [knowledgeSyncBusy, setKnowledgeSyncBusy] = useState(false);
   const [knowledgeSyncMessage, setKnowledgeSyncMessage] = useState<string | null>(null);
   const [knowledgeSyncPopupOpen, setKnowledgeSyncPopupOpen] = useState(false);
@@ -169,7 +165,7 @@ export function Sidebar({
       if (!(target instanceof Element)) return;
       if (settingsSectionRef.current?.contains(target)) return;
       if (target.closest(".config-popover")) return;
-      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal, .wiki-configure-modal, .wiki-sync-start-modal, .sync-progress-modal")) return;
+      if (target.closest(".modal-overlay, .llm-gateway-modal, .knowledge-graph-modal, .wiki-configure-modal, .sync-progress-modal")) return;
       collapseSettings();
     }
 
@@ -189,16 +185,9 @@ export function Sidebar({
       return;
     }
     if (choice !== "Sync" && choice !== "Rebuild") return;
-    setWikiSyncPending(choice);
-    handleSettingApplied();
-  }
-
-  async function startWikiSync(full: boolean, selectedModel: string) {
+    const full = choice === "Rebuild";
     const label = full ? "Rebuild" : "동기화";
-    const model = selectedModel.trim();
-    setWikiSyncPending(null);
     setWikiSyncTitle(full ? "Wiki Rebuild" : "Wiki Sync");
-    setWikiSyncModel(model || null);
     setWikiSyncPopupOpen(true);
     setWikiSyncBusy(true);
     setWikiSyncMessage(
@@ -206,15 +195,9 @@ export function Sidebar({
         ? "Wiki 전체 재빌드를 시작합니다…"
         : "Wiki 동기화를 시작합니다…",
     );
-    if (model && activeTask && model !== modelName) {
-      onPatchTask(activeTask.id, { model_name: model });
-    }
     try {
-      const result = await api.syncWiki(full, model || undefined);
+      const result = await api.syncWiki(full, modelName || undefined);
       const status = result.status;
-      if (result.vision_model) {
-        setWikiSyncModel(result.vision_model);
-      }
       if (status === "error") {
         setWikiSyncBusy(false);
         setWikiSyncMessage(result.error || `Wiki ${label}에 실패했습니다.`);
@@ -240,8 +223,11 @@ export function Sidebar({
       setWikiSyncMessage(
         err instanceof Error ? err.message : `Wiki ${label}에 실패했습니다.`,
       );
+    } finally {
+      handleSettingApplied();
     }
   }
+
 
   async function handleKnowledgeAction(choice: string) {
     if (choice === "On" || choice === "Off") {
@@ -326,9 +312,6 @@ export function Sidebar({
         if (cancelled) return;
         const busy = next.status === "queued" || next.status === "running";
         setWikiSyncBusy(busy);
-        if (next.vision_model) {
-          setWikiSyncModel(next.vision_model);
-        }
         if (next.progress) {
           setWikiSyncProgress(next.progress);
         }
@@ -778,23 +761,6 @@ export function Sidebar({
         <WikiConfigureModal onClose={() => setWikiConfigureOpen(false)} />
       )}
 
-      {wikiSyncPending && (
-        <WikiSyncStartModal
-          title={wikiSyncPending === "Rebuild" ? "Wiki Rebuild" : "Wiki Sync"}
-          description={
-            wikiSyncPending === "Rebuild"
-              ? "전체 문서를 다시 추출·그래프 빌드합니다. 사용할 모델을 선택하세요."
-              : "변경된 문서만 동기화합니다. 사용할 모델을 선택하세요."
-          }
-          modelOptions={modelOptions}
-          initialModel={modelName}
-          confirmLabel={wikiSyncPending === "Rebuild" ? "Rebuild 시작" : "Sync 시작"}
-          onCancel={() => setWikiSyncPending(null)}
-          onConfirm={(selected) => {
-            void startWikiSync(wikiSyncPending === "Rebuild", selected);
-          }}
-        />
-      )}
 
       {wikiSyncPopupOpen && (
         <SyncProgressModal
@@ -802,7 +768,6 @@ export function Sidebar({
           busy={wikiSyncBusy}
           message={wikiSyncMessage}
           progress={wikiSyncProgress}
-          modelName={wikiSyncModel}
           onClose={() => setWikiSyncPopupOpen(false)}
         />
       )}

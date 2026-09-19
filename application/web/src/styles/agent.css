@@ -2172,16 +2172,6 @@ button.config-popover-choice.is-selected {
   width: min(560px, 94vw);
 }
 
-.wiki-sync-start-modal {
-  width: min(420px, 92vw);
-}
-
-.wiki-sync-start-desc {
-  margin: 0 0 14px;
-  font-size: 0.9rem;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
 
 .wiki-configure-section-label {
   margin: 4px 0 8px;
@@ -2615,11 +2605,6 @@ button.config-popover-choice.is-selected {
   white-space: nowrap;
 }
 
-.sync-progress-model {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
 
 .sync-progress-meta {
   display: flex;
