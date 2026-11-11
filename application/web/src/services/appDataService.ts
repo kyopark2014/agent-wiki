@@ -137,18 +137,15 @@ export const appDataService = {
   async ensureInitialTask(
     config: AppConfig,
     sort: (tasks: Task[]) => Task[],
-    llmGatewayReady = false,
+    _llmGatewayReady = false,
   ): Promise<Task> {
     try {
       const latest = sort((await api.listTasks()).tasks);
       if (latest.length > 0) return latest[0];
+      // Leave model / feature flags unset so create_task reads settings.json.
       return await api.createTask({
-        model_name: config.default_model,
-        skills: config.default_skills,
-        mcp_servers: config.default_mcp_servers,
-        memory_enabled: true,
-        llm_gateway_enabled:
-          Boolean(config.llm_gateway_configured) && llmGatewayReady,
+        skills: config.default_skills ?? [],
+        mcp_servers: config.default_mcp_servers ?? [],
       });
     } catch (error) {
       throw sanitizeError(error, "Failed to initialize task.");

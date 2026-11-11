@@ -141,7 +141,7 @@ export function LlmGatewayModal({
   const description = isAdmin
     ? "URL을 확인하고, Key는 변경할 때만 입력하세요(비우면 기존 키 유지). 모델 목록 조회에 성공하면 저장·활성화합니다."
     : gatewayConfigured
-      ? "이 태스크에서 LLM Gateway 사용을 켜거나 끕니다. 공용 API 키는 서버에만 보관됩니다."
+      ? "모든 태스크에서 LLM Gateway 사용을 켜거나 끕니다. 공용 API 키는 서버에만 보관됩니다."
       : "LLM Gateway가 아직 설정되지 않았습니다. 관리자에게 설정을 요청하세요.";
 
   return createPortal(
