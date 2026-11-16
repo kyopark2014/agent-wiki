@@ -1129,6 +1129,147 @@ select {
   z-index: 5;
 }
 
+/* Sit above fullscreen MCP Apps so the activity strip stays readable. */
+.chat-input-area.is-waiting {
+  z-index: 70;
+}
+
+.agent-activity-strip {
+  max-width: 820px;
+  margin: 0 auto 10px;
+}
+
+.agent-activity-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-activity-summary:disabled {
+  cursor: default;
+}
+
+.agent-activity-summary:not(:disabled):hover,
+.agent-activity-summary:not(:disabled):focus-visible {
+  background: var(--bg-tertiary);
+  outline: none;
+}
+
+.agent-activity-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #e8a23a;
+}
+
+.agent-activity-dots {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-activity-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.agent-activity-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-activity-caret {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  display: inline-flex;
+}
+
+.agent-activity-steps {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.agent-activity-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-activity-step.is-pending {
+  color: var(--text-primary);
+}
+
+.agent-activity-step-mark {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.agent-activity-step.is-pending .agent-activity-step-mark {
+  background: #e8a23a;
+  box-shadow: 0 0 0 3px rgba(232, 162, 58, 0.18);
+}
+
+.agent-activity-step-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-activity-step-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-activity-step-detail {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .agent-activity-summary {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+
 .chat-queue-panel {
   max-width: 820px;
   margin: 0 auto 8px;

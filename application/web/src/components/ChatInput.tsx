@@ -14,6 +14,8 @@ import {
   collectClipboardImages,
   useFileUpload,
 } from "../hooks/useFileUpload";
+import type { ToolEvent } from "../types";
+import { AgentActivityStrip } from "./AgentActivityStrip";
 
 interface QueuedMessage {
   id: string;
@@ -25,6 +27,11 @@ interface Props {
   disabled?: boolean;
   /** True while waiting for an assistant response (shows stop icon + progress animation). */
   waiting?: boolean;
+  /** Live tool timeline used for the composer activity strip. */
+  streamEvents?: ToolEvent[];
+  /** In-progress assistant text (shows “응답 작성 중” when tools are idle). */
+  streamText?: string;
+
   queuedMessages?: QueuedMessage[];
   queuePaused?: boolean;
   onRemoveQueued?: (id: string) => void;
@@ -32,6 +39,8 @@ interface Props {
   onResumeQueue?: () => void;
   onStop?: () => void;
   onSend: (text: string, files?: string[]) => void;
+  /** Task whose uploads stay attached across screen changes. */
+  taskId?: string | null;
   onRagUploadComplete?: (message: string) => void;
   onWikiUploadComplete?: (message: string) => void;
   /** Active task model — forwarded to Wiki Sync after raw upload. */
@@ -50,6 +59,8 @@ const MENU_VERTICAL_OFFSET = 8; // gap between the input box and the popup menu 
 export function ChatInput({
   disabled,
   waiting = false,
+  streamEvents = [],
+  streamText = "",
   queuedMessages = [],
   queuePaused = false,
   onRemoveQueued,
@@ -57,6 +68,7 @@ export function ChatInput({
   onResumeQueue,
   onStop,
   onSend,
+  taskId = null,
   onRagUploadComplete,
   onWikiUploadComplete,
   syncModel,
@@ -95,7 +107,7 @@ export function ChatInput({
     onDragOver,
     onDragLeave,
     onDrop,
-  } = useFileUpload({ disabled, syncModel });
+  } = useFileUpload({ disabled, syncModel, taskId });
 
   function adjustInputHeight() {
     const el = textareaRef.current;
@@ -374,7 +386,12 @@ export function ChatInput({
       : null;
 
   return (
-    <div className="chat-input-area">
+    <div className={`chat-input-area${waiting ? " is-waiting" : ""}`}>
+      <AgentActivityStrip
+        waiting={waiting}
+        streamEvents={streamEvents}
+        streamText={streamText}
+      />
       {uploadError && (
         <div className="chat-upload-error" role="alert">
           {uploadError}
