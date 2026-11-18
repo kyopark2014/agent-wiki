@@ -38,6 +38,8 @@ MODELS = [
     "Claude 4.5 Haiku",
     "OpenAI GPT 5.4",
     "OpenAI GPT 5.5",
+    "OpenAI GPT 6.2 Astra",
+    "OpenAI GPT 6.2 Sol",
     "OpenAI GPT 6 Astra",
     "OpenAI GPT 6.1 Sol",
     "OpenAI GPT 6 Sol",

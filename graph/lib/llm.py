@@ -39,6 +39,8 @@ _MODEL_ALIASES: dict[str, str] = {
     "haiku-4.5": "claude-haiku-4-5",
     "OpenAI GPT 5.5": "gpt-5.5",
     "OpenAI GPT 5.4": "gpt-5.4",
+    "OpenAI GPT 6.2 Astra": "gpt-6.2-astra",
+    "OpenAI GPT 6.2 Sol": "gpt-6.2-sol",
     "OpenAI GPT 6 Astra": "gpt-6-astra",
     "OpenAI GPT 6.1 Sol": "gpt-6.1-sol",
     "OpenAI GPT 6 Sol": "gpt-6-sol",
