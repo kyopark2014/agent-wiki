@@ -6,7 +6,12 @@ export const MAX_TASK_TITLE_LENGTH = 50;
 export function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    const updatedDiff =
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    if (updatedDiff !== 0) return updatedDiff;
+    // Tie-break so identical updated_at (e.g. after global settings sync) keeps
+    // newer conversations above older ones instead of UUID order.
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 }
 
