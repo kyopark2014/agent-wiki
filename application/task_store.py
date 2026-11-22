@@ -400,7 +400,7 @@ def list_tasks(user_id: str, limit: int = 100) -> list[dict[str, Any]]:
             """
             SELECT * FROM tasks
             WHERE user_id = ?
-            ORDER BY pinned DESC, updated_at DESC
+            ORDER BY pinned DESC, updated_at DESC, created_at DESC
             LIMIT ?
             """,
             (user_id, limit),
@@ -489,7 +489,11 @@ def update_all_tasks(
     memory_enabled: bool | None = None,
     llm_gateway_enabled: bool | None = None,
 ) -> int:
-    """Apply shared settings to every task for ``user_id``. Returns rows updated."""
+    """Apply shared settings to every task for ``user_id``. Returns rows updated.
+
+    Does **not** bump ``updated_at`` — model/flag sync is not conversation activity,
+    and stamping every row with the same timestamp collapses sidebar sort order.
+    """
     sets: list[str] = []
     values: list[Any] = []
     if model_name is not None:
@@ -506,8 +510,7 @@ def update_all_tasks(
         values.append(1 if llm_gateway_enabled else 0)
     if not sets:
         return 0
-    sets.append("updated_at = ?")
-    values.append(_now_iso())
+    # Do not bump updated_at — settings sync is not conversation activity.
     values.append(user_id)
     with _connect_user(user_id) as conn:
         cur = conn.execute(
@@ -534,6 +537,46 @@ def update_all_task_flags(
         memory_enabled=memory_enabled,
         llm_gateway_enabled=llm_gateway_enabled,
     )
+
+
+def repair_updated_at_from_messages(user_id: str) -> dict[str, int]:
+    """Restore ``updated_at`` from each task's latest message (else ``created_at``).
+
+    Recovers sidebar order after a bulk settings sync stamped every task with the
+    same ``updated_at``. Returns ``{checked, updated, unchanged}``.
+    """
+    checked = updated = unchanged = 0
+    with _connect_user(user_id) as conn:
+        rows = conn.execute(
+            "SELECT id, created_at, updated_at FROM tasks WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        for row in rows:
+            checked += 1
+            task_id = row["id"]
+            created_at = row["created_at"] or ""
+            current = row["updated_at"] or ""
+            msg = conn.execute(
+                """
+                SELECT created_at FROM messages
+                WHERE task_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (task_id,),
+            ).fetchone()
+            desired = (msg["created_at"] if msg else None) or created_at or current
+            if not desired or desired == current:
+                unchanged += 1
+                continue
+            conn.execute(
+                "UPDATE tasks SET updated_at = ? WHERE id = ? AND user_id = ?",
+                (desired, task_id, user_id),
+            )
+            updated += 1
+    if updated:
+        flush_persist(user_id)
+    return {"checked": checked, "updated": updated, "unchanged": unchanged}
 
 
 def update_task(task_id: str, user_id: str, **fields: Any) -> dict[str, Any] | None:
